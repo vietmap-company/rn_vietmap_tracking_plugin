@@ -29,9 +29,9 @@ RCT_EXPORT_MODULE()
     return result;
 }
 
-- (void)startLocationTracking:(JS::NativeRnVietmapTrackingPlugin::SpecStartLocationTrackingConfig &)config
-                      resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject {
+RCT_EXPORT_METHOD(startLocationTracking:(NSDictionary *)config
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
 
     // Check location permissions
     CLAuthorizationStatus status = [CLLocationManager authorizationStatus];
@@ -48,19 +48,24 @@ RCT_EXPORT_MODULE()
         return;
     }
 
+    // Extract configuration values
+    NSString *accuracy = config[@"accuracy"] ?: @"high";
+    double distanceFilter = [config[@"distanceFilter"] doubleValue] ?: 10.0;
+    BOOL backgroundMode = [config[@"backgroundMode"] boolValue] ?: NO;
+
     // Configure location manager
-    self.locationManager.desiredAccuracy = [self getAccuracyFromString:config.accuracy()];
-    self.locationManager.distanceFilter = config.distanceFilter();
+    self.locationManager.desiredAccuracy = [self getAccuracyFromString:accuracy];
+    self.locationManager.distanceFilter = distanceFilter;
 
     // Start location updates
     [self.locationManager startUpdatingLocation];
 
     // Request background location if needed
-    if (config.backgroundMode() && status != kCLAuthorizationStatusAuthorizedAlways) {
+    if (backgroundMode && status != kCLAuthorizationStatusAuthorizedAlways) {
         [self.locationManager requestAlwaysAuthorization];
     }
 
-    if (config.backgroundMode()) {
+    if (backgroundMode) {
         [self.locationManager startMonitoringSignificantLocationChanges];
     }
 
@@ -71,8 +76,8 @@ RCT_EXPORT_MODULE()
     resolve(@YES);
 }
 
-- (void)stopLocationTracking:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject {
+RCT_EXPORT_METHOD(stopLocationTracking:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
 
     [self.locationManager stopUpdatingLocation];
     [self.locationManager stopMonitoringSignificantLocationChanges];
@@ -83,8 +88,8 @@ RCT_EXPORT_MODULE()
     resolve(@YES);
 }
 
-- (void)getCurrentLocation:(RCTPromiseResolveBlock)resolve
-                    reject:(RCTPromiseRejectBlock)reject {
+RCT_EXPORT_METHOD(getCurrentLocation:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
 
     CLAuthorizationStatus status = [CLLocationManager authorizationStatus];
     if (status == kCLAuthorizationStatusDenied || status == kCLAuthorizationStatusRestricted) {
@@ -101,12 +106,13 @@ RCT_EXPORT_MODULE()
     }
 }
 
-- (NSNumber *)isTrackingActive {
-    return @(self.isTracking);
+RCT_EXPORT_METHOD(isTrackingActive:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+    resolve(@(self.isTracking));
 }
 
-- (void)getTrackingStatus:(RCTPromiseResolveBlock)resolve
-                   reject:(RCTPromiseRejectBlock)reject {
+RCT_EXPORT_METHOD(getTrackingStatus:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
 
     NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
     NSTimeInterval duration = self.isTracking ? (currentTime - self.trackingStartTime) : 0;
@@ -120,24 +126,28 @@ RCT_EXPORT_MODULE()
     resolve(status);
 }
 
-- (void)updateTrackingConfig:(JS::NativeRnVietmapTrackingPlugin::SpecUpdateTrackingConfigConfig &)config
-                     resolve:(RCTPromiseResolveBlock)resolve
-                      reject:(RCTPromiseRejectBlock)reject {
+RCT_EXPORT_METHOD(updateTrackingConfig:(NSDictionary *)config
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
 
     if (!self.isTracking) {
         reject(@"NOT_TRACKING", @"Location tracking is not active", nil);
         return;
     }
 
+    // Extract configuration values
+    NSString *accuracy = config[@"accuracy"] ?: @"high";
+    double distanceFilter = [config[@"distanceFilter"] doubleValue] ?: 10.0;
+
     // Update configuration
-    self.locationManager.desiredAccuracy = [self getAccuracyFromString:config.accuracy()];
-    self.locationManager.distanceFilter = config.distanceFilter();
+    self.locationManager.desiredAccuracy = [self getAccuracyFromString:accuracy];
+    self.locationManager.distanceFilter = distanceFilter;
 
     resolve(@YES);
 }
 
-- (void)requestLocationPermissions:(RCTPromiseResolveBlock)resolve
-                            reject:(RCTPromiseRejectBlock)reject {
+RCT_EXPORT_METHOD(requestLocationPermissions:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
 
     CLAuthorizationStatus status = [CLLocationManager authorizationStatus];
 
@@ -151,14 +161,14 @@ RCT_EXPORT_MODULE()
             resolve(@"denied");
             break;
         case kCLAuthorizationStatusNotDetermined:
-            [self.locationManager requestWhenInUseAuthorization];
+             [self.locationManager requestWhenInUseAuthorization];
             resolve(@"pending");
             break;
     }
 }
 
-- (void)hasLocationPermissions:(RCTPromiseResolveBlock)resolve
-                        reject:(RCTPromiseRejectBlock)reject {
+RCT_EXPORT_METHOD(hasLocationPermissions:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
 
     CLAuthorizationStatus status = [CLLocationManager authorizationStatus];
     BOOL hasPermission = (status == kCLAuthorizationStatusAuthorizedWhenInUse ||
@@ -223,12 +233,6 @@ RCT_EXPORT_MODULE()
     };
 
     [self sendEventWithName:@"onTrackingStatusChanged" body:status];
-}
-
-- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
-    (const facebook::react::ObjCTurboModule::InitParams &)params
-{
-    return std::make_shared<facebook::react::NativeRnVietmapTrackingPluginSpecJSI>(params);
 }
 
 @end

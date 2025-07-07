@@ -6,7 +6,22 @@ const root = path.resolve(__dirname, '..');
 
 module.exports = getConfig(
   {
-    presets: ['module:@react-native/babel-preset'],
+    presets: [
+      [
+        'module:@react-native/babel-preset',
+        {
+          unstable_transformProfile: 'hermes-stable',
+        },
+      ],
+    ],
+    plugins: [
+      [
+        '@babel/plugin-transform-react-jsx',
+        {
+          runtime: 'classic',
+        },
+      ],
+    ],
   },
   { root, pkg }
 );

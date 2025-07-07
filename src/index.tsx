@@ -58,9 +58,9 @@ export async function getCurrentLocation(): Promise<LocationData> {
 
 /**
  * Check if location tracking is currently active
- * @returns boolean - Tracking status
+ * @returns Promise<boolean> - Tracking status
  */
-export function isTrackingActive(): boolean {
+export async function isTrackingActive(): Promise<boolean> {
   return RnVietmapTrackingPlugin.isTrackingActive();
 }
 
