@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
@@ -11,6 +12,7 @@ import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.OnCompleteListener
+import java.util.*
 
 @ReactModule(name = RnVietmapTrackingPluginModule.NAME)
 class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
@@ -23,6 +25,10 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var trackingStartTime: Long = 0
   private var lastLocationUpdate: Long = 0
   private var backgroundLocationService: Intent? = null
+  private var locationTimer: Timer? = null
+  private var intervalMs: Long = 5000 // Default 5 seconds
+  private var backgroundMode = false
+  private var currentConfig: ReadableMap? = null
 
   init {
     fusedLocationClient = LocationServices.getFusedLocationProviderClient(reactContext)
@@ -44,12 +50,14 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         return
       }
 
-      val intervalMs = config.getInt("intervalMs").toLong()
+      // Store configuration
+      currentConfig = config
+      intervalMs = config.getInt("intervalMs").toLong()
       val distanceFilter = config.getDouble("distanceFilter").toFloat()
       val accuracy = config.getString("accuracy") ?: "high"
-      val backgroundMode = config.getBoolean("backgroundMode")
+      backgroundMode = config.getBoolean("backgroundMode")
 
-      // Create location request
+      // Create location request with longer interval for battery optimization
       locationRequest = LocationRequest.create().apply {
         this.interval = intervalMs
         this.fastestInterval = intervalMs / 2
@@ -74,26 +82,19 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
       // Start location updates
       if (ContextCompat.checkSelfPermission(reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-        fusedLocationClient?.requestLocationUpdates(
-          locationRequest!!,
-          locationCallback!!,
-          Looper.getMainLooper()
-        )?.addOnCompleteListener(OnCompleteListener { task ->
-          if (task.isSuccessful) {
-            isTracking = true
-            trackingStartTime = System.currentTimeMillis()
+        isTracking = true
+        trackingStartTime = System.currentTimeMillis()
 
-            // Start foreground service for background tracking
-            if (backgroundMode) {
-              startBackgroundLocationService(config)
-            }
+        // Start timer-based location tracking after setting isTracking = true
+        startLocationTimer()
 
-            sendTrackingStatusUpdate()
-            promise.resolve(true)
-          } else {
-            promise.reject("START_FAILED", "Failed to start location tracking")
-          }
-        })
+        // Start foreground service for background tracking
+        if (backgroundMode) {
+          startBackgroundLocationService(config)
+        }
+
+        sendTrackingStatusUpdate()
+        promise.resolve(true)
       } else {
         promise.reject("PERMISSION_DENIED", "Location permissions are required")
       }
@@ -104,6 +105,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
   override fun stopLocationTracking(promise: Promise) {
     try {
+      // Stop timer
+      stopLocationTimer()
+
       if (locationCallback != null) {
         fusedLocationClient?.removeLocationUpdates(locationCallback!!)
       }
@@ -115,6 +119,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       }
 
       isTracking = false
+      backgroundMode = false
+      currentConfig = null
       sendTrackingStatusUpdate()
       promise.resolve(true)
     } catch (e: Exception) {
@@ -235,6 +241,67 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       putExtra("config", Arguments.toBundle(config))
     }
     reactApplicationContext.startForegroundService(backgroundLocationService)
+  }  // Timer-based location tracking methods
+  private fun startLocationTimer() {
+    stopLocationTimer() // Stop any existing timer
+
+    println("Starting location timer with interval: ${intervalMs}ms")
+
+    locationTimer = Timer()
+    locationTimer?.scheduleAtFixedRate(object : TimerTask() {
+      override fun run() {
+        println("Timer fired - requesting location update")
+        requestLocationUpdate()
+      }
+    }, 0, intervalMs) // Start immediately, then repeat every intervalMs
+  }
+
+  private fun stopLocationTimer() {
+    locationTimer?.cancel()
+    locationTimer = null
+  }
+
+  private fun requestLocationUpdate() {
+    println("📝 requestLocationUpdate called - isTracking: $isTracking")
+
+    if (!isTracking) {
+      println("⚠️ Not tracking, skipping location request")
+      return
+    }
+
+    if (ContextCompat.checkSelfPermission(reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+      // Request a fresh location update instead of using cached location
+      locationRequest?.let { request ->
+        val singleLocationCallback = object : LocationCallback() {
+          override fun onLocationResult(locationResult: LocationResult) {
+            locationResult.lastLocation?.let { location ->
+              lastLocationUpdate = System.currentTimeMillis()
+              sendLocationUpdate(location)
+            }
+            // Remove this single-use callback
+            fusedLocationClient?.removeLocationUpdates(this)
+          }
+        }
+
+        // Request a single fresh location update
+        fusedLocationClient?.requestLocationUpdates(
+          request,
+          singleLocationCallback,
+          Looper.getMainLooper()
+        )
+      }
+    } else {
+      // Send error event for missing permissions
+      val errorInfo = Arguments.createMap().apply {
+        putString("error", "Location permissions are required")
+        putString("code", "PERMISSION_DENIED")
+        putDouble("timestamp", System.currentTimeMillis().toDouble())
+      }
+
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("onLocationError", errorInfo)
+    }
   }
 
   companion object {

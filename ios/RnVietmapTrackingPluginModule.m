@@ -38,4 +38,14 @@ RCT_EXTERN_METHOD(requestLocationPermissions:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(hasLocationPermissions:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
++ (BOOL)requiresMainQueueSetup
+{
+  return YES;
+}
+
+- (NSArray<NSString *> *)supportedEvents
+{
+  return @[@"onLocationUpdate", @"onTrackingStatusChanged", @"onLocationError", @"onPermissionChanged"];
+}
+
 @end

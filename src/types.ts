@@ -31,3 +31,5 @@ export interface TrackingStatus {
 
 export type LocationUpdateCallback = (location: LocationData) => void;
 export type TrackingStatusCallback = (status: TrackingStatus) => void;
+export type LocationErrorCallback = (error: { error: string; code: string; timestamp: number }) => void;
+export type PermissionChangeCallback = (permission: { status: string; timestamp: number }) => void;

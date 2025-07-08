@@ -6,7 +6,9 @@ import type {
   LocationData,
   TrackingStatus,
   LocationUpdateCallback,
-  TrackingStatusCallback
+  TrackingStatusCallback,
+  LocationErrorCallback,
+  PermissionChangeCallback
 } from './types';
 
 // Event emitter for location updates
@@ -117,6 +119,24 @@ export function addTrackingStatusListener(callback: TrackingStatusCallback) {
 }
 
 /**
+ * Subscribe to location errors
+ * @param callback - Callback function to receive error information
+ * @returns Subscription object with remove method
+ */
+export function addLocationErrorListener(callback: (error: { error: string; code: string; timestamp: number }) => void) {
+  return eventEmitter.addListener('onLocationError', callback);
+}
+
+/**
+ * Subscribe to permission changes
+ * @param callback - Callback function to receive permission status changes
+ * @returns Subscription object with remove method
+ */
+export function addPermissionChangeListener(callback: (permission: { status: string; timestamp: number }) => void) {
+  return eventEmitter.addListener('onPermissionChanged', callback);
+}
+
+/**
  * Create default tracking configuration
  * @param intervalMs - Update interval in milliseconds (default: 5000)
  * @returns LocationTrackingConfig - Default configuration
@@ -160,5 +180,7 @@ export type {
   LocationData,
   TrackingStatus,
   LocationUpdateCallback,
-  TrackingStatusCallback
+  TrackingStatusCallback,
+  LocationErrorCallback,
+  PermissionChangeCallback
 };
