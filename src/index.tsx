@@ -25,6 +25,11 @@ export function multiply(a: number, b: number): number {
  */
 export async function startLocationTracking(config: LocationTrackingConfig): Promise<boolean> {
   try {
+    // Debug: Log config before sending to native
+    console.log('📤 Sending config to native:', JSON.stringify(config, null, 2));
+    console.log('📤 Config intervalMs:', config.intervalMs);
+    console.log('📤 Config keys:', Object.keys(config));
+
     // Request permissions first
     const hasPermission = await RnVietmapTrackingPlugin.hasLocationPermissions();
     if (!hasPermission) {

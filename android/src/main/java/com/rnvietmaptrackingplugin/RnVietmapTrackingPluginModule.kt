@@ -6,10 +6,14 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.*
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.facebook.react.modules.core.PermissionAwareActivity
+import com.facebook.react.modules.core.PermissionListener
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.OnCompleteListener
 import java.util.*
@@ -30,6 +34,14 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var backgroundMode = false
   private var currentConfig: ReadableMap? = null
 
+  // Permission request handling
+  private var permissionPromise: Promise? = null
+
+  companion object {
+    const val NAME = "RnVietmapTrackingPlugin"
+    const val LOCATION_PERMISSION_REQUEST_CODE = 1001
+  }
+
   init {
     fusedLocationClient = LocationServices.getFusedLocationProviderClient(reactContext)
   }
@@ -41,10 +53,25 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   // Example method
   override fun multiply(a: Double, b: Double): Double {
     return a * b
-  }
-
-  override fun startLocationTracking(config: ReadableMap, promise: Promise) {
+  }  override fun startLocationTracking(config: ReadableMap, promise: Promise) {
     try {
+      // Debug: Log received config
+      Log.d("VietmapTracking", "📋 Received config: ${config.toString()}")
+
+      // Log all keys in config
+      val keys = mutableListOf<String>()
+      val iterator = config.keySetIterator()
+      while (iterator.hasNextKey()) {
+        keys.add(iterator.nextKey())
+      }
+      Log.d("VietmapTracking", "📋 Config keys: $keys")
+
+      if (config.hasKey("intervalMs")) {
+        Log.d("VietmapTracking", "✅ intervalMs key exists: ${config.getInt("intervalMs")}")
+      } else {
+        Log.e("VietmapTracking", "❌ intervalMs key NOT found in config!")
+      }
+
       if (!hasLocationPermissions()) {
         promise.reject("PERMISSION_DENIED", "Location permissions are required")
         return
@@ -52,10 +79,16 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
       // Store configuration
       currentConfig = config
-      intervalMs = config.getInt("intervalMs").toLong()
+      intervalMs = if (config.hasKey("intervalMs")) config.getInt("intervalMs").toLong() else 5000L
       val distanceFilter = config.getDouble("distanceFilter").toFloat()
       val accuracy = config.getString("accuracy") ?: "high"
       backgroundMode = config.getBoolean("backgroundMode")
+
+      Log.d("VietmapTracking", "📊 Parsed config values:")
+      Log.d("VietmapTracking", "  - intervalMs: ${intervalMs}")
+      Log.d("VietmapTracking", "  - distanceFilter: ${distanceFilter}")
+      Log.d("VietmapTracking", "  - accuracy: ${accuracy}")
+      Log.d("VietmapTracking", "  - backgroundMode: ${backgroundMode}")
 
       // Create location request with longer interval for battery optimization
       locationRequest = LocationRequest.create().apply {
@@ -183,12 +216,68 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   override fun requestLocationPermissions(promise: Promise) {
-    // This should trigger the permission request dialog
-    // For now, just return the current permission status
+    println("🔐 Requesting location permissions...")
+
     if (hasLocationPermissions()) {
+      println("✅ Permissions already granted")
       promise.resolve("granted")
+      return
+    }
+
+    // Store promise for callback
+    permissionPromise = promise
+
+    val activity = reactApplicationContext.currentActivity
+    if (activity == null) {
+      println("❌ No current activity available")
+      promise.reject("NO_ACTIVITY", "No current activity available for permission request")
+      permissionPromise = null
+      return
+    }
+
+    if (activity is PermissionAwareActivity) {
+      val permissionAwareActivity = activity as PermissionAwareActivity
+
+      val permissions = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+      )
+
+      val permissionListener = object : PermissionListener {
+        override fun onRequestPermissionsResult(
+          requestCode: Int,
+          permissions: Array<String>,
+          grantResults: IntArray
+        ): Boolean {
+          if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+            val granted = grantResults.isNotEmpty() &&
+                         grantResults[0] == PackageManager.PERMISSION_GRANTED
+
+            permissionPromise?.let { promise ->
+              if (granted) {
+                println("✅ Location permissions granted by user")
+                promise.resolve("granted")
+              } else {
+                println("❌ Location permissions denied by user")
+                promise.resolve("denied")
+              }
+            }
+            permissionPromise = null
+            return true
+          }
+          return false
+        }
+      }
+
+      permissionAwareActivity.requestPermissions(
+        permissions,
+        LOCATION_PERMISSION_REQUEST_CODE,
+        permissionListener
+      )
     } else {
-      promise.resolve("denied")
+      println("❌ Activity is not PermissionAware")
+      promise.reject("ACTIVITY_NOT_PERMISSION_AWARE", "Current activity does not support permission requests")
+      permissionPromise = null
     }
   }
 
@@ -197,10 +286,24 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   private fun hasLocationPermissions(): Boolean {
-    return ContextCompat.checkSelfPermission(
+    val fineLocationGranted = ContextCompat.checkSelfPermission(
       reactApplicationContext,
       Manifest.permission.ACCESS_FINE_LOCATION
     ) == PackageManager.PERMISSION_GRANTED
+
+    val coarseLocationGranted = ContextCompat.checkSelfPermission(
+      reactApplicationContext,
+      Manifest.permission.ACCESS_COARSE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+
+    val hasPermissions = fineLocationGranted || coarseLocationGranted
+
+    println("📋 Permission status check:")
+    println("  - Fine location: $fineLocationGranted")
+    println("  - Coarse location: $coarseLocationGranted")
+    println("  - Has permissions: $hasPermissions")
+
+    return hasPermissions
   }
 
   private fun createLocationMap(location: Location): WritableMap {
@@ -302,9 +405,5 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         .emit("onLocationError", errorInfo)
     }
-  }
-
-  companion object {
-    const val NAME = "RnVietmapTrackingPlugin"
   }
 }
