@@ -544,4 +544,21 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     sendEvent("onLocationUpdate", locationData)
     println("📡 Location event sent to React Native (forced mode)")
   }
+
+  // MARK: - Speed Alert Methods
+
+  @ReactMethod
+  override fun listenerAlert(promise: Promise) {
+    Log.d(NAME, "🚨 Speed alert listener initialized")
+    
+    // TODO: Implement speed alert logic here
+    // For now, just resolve the promise to indicate the listener is active
+    // In a real implementation, you would:
+    // 1. Set up speed monitoring
+    // 2. Configure speed limit detection  
+    // 3. Monitor current speed vs speed limits
+    // 4. Send speed alert events via sendEvent("onSpeedAlert", alertData)
+    
+    promise.resolve(null)
+  }
 }

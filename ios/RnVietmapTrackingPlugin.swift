@@ -744,4 +744,21 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             return "unknown"
         }
     }
+
+    // MARK: - Speed Alert Methods
+
+    @objc(listenerAlert:rejecter:)
+    func listenerAlert(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        print("🚨 Speed alert listener initialized")
+
+        // TODO: Implement speed alert logic here
+        // For now, just resolve the promise to indicate the listener is active
+        // In a real implementation, you would:
+        // 1. Set up speed monitoring
+        // 2. Configure speed limit detection
+        // 3. Monitor current speed vs speed limits
+        // 4. Send speed alert events via sendEvent(withName: "onSpeedAlert", body: alertData)
+
+        resolver(nil)
+    }
 }

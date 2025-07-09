@@ -1,3 +1,5 @@
+// @ts-ignore
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -19,12 +21,14 @@ import {
   requestLocationPermissions,
   hasLocationPermissions,
   updateTrackingConfig,
+  listenerAlert,
   TrackingPresets,
   LocationUtils,
   TrackingSession,
   type LocationData,
   type TrackingStatus,
   type LocationTrackingConfig,
+  type SpeedAlertEvent,
 } from 'rn_vietmap_tracking_plugin';
 
 const GPSTrackingDemo = () => {
@@ -33,6 +37,10 @@ const GPSTrackingDemo = () => {
   const [hasPermissions, setHasPermissions] = useState(false);
   const [locationHistory, setLocationHistory] = useState<LocationData[]>([]);
   const [sessionStats, setSessionStats] = useState<any>(null);
+
+  // Speed Alert state
+  const [isSpeedAlertEnabled, setIsSpeedAlertEnabled] = useState(false);
+  const [lastSpeedAlert, setLastSpeedAlert] = useState<SpeedAlertEvent | null>(null);
 
   // Configuration state
   const [config, setConfig] = useState<LocationTrackingConfig>(TrackingPresets.GENERAL);
@@ -46,6 +54,7 @@ const GPSTrackingDemo = () => {
   const trackingSession = useRef(new TrackingSession());
   const locationSubscription = useRef<any>(null);
   const statusSubscription = useRef<any>(null);
+  const speedAlertSubscription = useRef<any>(null);
 
   useEffect(() => {
     initializeTracking();
@@ -91,6 +100,9 @@ const GPSTrackingDemo = () => {
     }
     if (statusSubscription.current) {
       statusSubscription.current.remove();
+    }
+    if (speedAlertSubscription.current) {
+      speedAlertSubscription.current.remove();
     }
   };
 
@@ -209,7 +221,41 @@ const GPSTrackingDemo = () => {
     setLocationHistory([]);
     setSessionStats(null);
     trackingSession.current.clear();
-  };  const calculateTotalDistance = () => {
+  };
+
+  const handleSpeedAlertToggle = async (enabled: boolean) => {
+    try {
+      if (enabled) {
+        // Start speed alert listener
+        const subscription = await listenerAlert((alert: SpeedAlertEvent) => {
+          console.log('🚨 Speed Alert:', alert);
+          setLastSpeedAlert(alert);
+          Alert.alert(
+            '🚨 Speed Alert',
+            `Current: ${alert.currentSpeed} km/h\nLimit: ${alert.speedLimit} km/h\nSeverity: ${alert.severity}`,
+            [{ text: 'OK' }]
+          );
+        });
+        speedAlertSubscription.current = subscription;
+        setIsSpeedAlertEnabled(true);
+        Alert.alert('✅ Speed Alert', 'Speed alert listener started');
+      } else {
+        // Stop speed alert listener
+        if (speedAlertSubscription.current) {
+          speedAlertSubscription.current.remove();
+          speedAlertSubscription.current = null;
+        }
+        setIsSpeedAlertEnabled(false);
+        setLastSpeedAlert(null);
+        Alert.alert('🛑 Speed Alert', 'Speed alert listener stopped');
+      }
+    } catch (error) {
+      console.error('Error toggling speed alert:', error);
+      Alert.alert('❌ Error', 'Failed to toggle speed alert');
+    }
+  };
+
+  const calculateTotalDistance = () => {
     if (locationHistory.length < 2) return 0;
 
     let totalDistance = 0;
@@ -430,6 +476,32 @@ const GPSTrackingDemo = () => {
         >
           <Text style={styles.buttonText}>🗑️ Clear History</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Speed Alert Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🚨 Speed Alert</Text>
+        <View style={styles.switchRow}>
+          <Text style={styles.label}>Enable Speed Alert:</Text>
+          <Switch
+            value={isSpeedAlertEnabled}
+            onValueChange={handleSpeedAlertToggle}
+          />
+        </View>
+
+        {lastSpeedAlert && (
+          <View style={styles.alertInfo}>
+            <Text style={styles.alertText}>
+              <Text style={styles.bold}>Current Speed:</Text> {lastSpeedAlert.currentSpeed} km/h
+            </Text>
+            <Text style={styles.alertText}>
+              <Text style={styles.bold}>Speed Limit:</Text> {lastSpeedAlert.speedLimit} km/h
+            </Text>
+            <Text style={styles.alertText}>
+              <Text style={styles.bold}>Severity:</Text> {lastSpeedAlert.severity}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Current Location Section */}
@@ -728,6 +800,16 @@ const styles = StyleSheet.create({
     color: '#007bff',
     textAlign: 'center',
     marginTop: 10,
+  },
+  alertInfo: {
+    backgroundColor: '#fff3cd',
+    padding: 10,
+    borderRadius: 6,
+    marginTop: 10,
+  },
+  alertText: {
+    fontSize: 14,
+    color: '#856404',
   },
 });
 

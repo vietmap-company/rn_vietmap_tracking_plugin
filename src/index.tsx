@@ -8,7 +8,9 @@ import type {
   LocationUpdateCallback,
   TrackingStatusCallback,
   LocationErrorCallback,
-  PermissionChangeCallback
+  PermissionChangeCallback,
+  SpeedAlertEvent,
+  SpeedAlertCallback
 } from './types';
 
 // Event emitter for location updates
@@ -204,6 +206,35 @@ export async function stopTracking(): Promise<string> {
   }
 }
 
+/**
+ * Speed Alert Function
+ */
+
+/**
+ * Start listening for speed alerts
+ * This function will set up speed alert monitoring and return callback data when speed limits are exceeded
+ * @param callback - Callback function to receive speed alert data
+ * @returns Subscription object with remove method
+ */
+export async function listenerAlert(callback: (alert: SpeedAlertEvent) => void) {
+  try {
+    console.log('🚨 Starting speed alert listener');
+
+    // Call native method to initialize speed alert monitoring
+    await RnVietmapTrackingPlugin.listenerAlert();
+
+    // Subscribe to speed alert events from native
+    const subscription = eventEmitter.addListener('onSpeedAlert', callback);
+
+    console.log('✅ Speed alert listener activated');
+    return subscription;
+
+  } catch (error) {
+    console.error('❌ Failed to start speed alert listener:', error);
+    throw error;
+  }
+}
+
 // Export utilities and presets
 export { TrackingPresets, LocationUtils, TrackingSession } from './utils';
 
@@ -221,5 +252,7 @@ export type {
   LocationUpdateCallback,
   TrackingStatusCallback,
   LocationErrorCallback,
-  PermissionChangeCallback
+  PermissionChangeCallback,
+  SpeedAlertEvent,
+  SpeedAlertCallback
 };
