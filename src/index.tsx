@@ -150,13 +150,22 @@ export function createDefaultConfig(intervalMs: number = 5000): LocationTracking
  * Start GPS tracking with continuous location updates
  * @param backgroundMode - Enable background tracking (requires 'Always' permission)
  * @param intervalMs - Update interval in milliseconds for throttling
+ * @param forceUpdateBackground - Force continuous updates bypassing distance filter and OS throttling
+ * @param distanceFilter - Minimum distance in meters for location updates (default: 10m)
  * @returns Promise<string> - Status message
  */
-export async function startTracking(backgroundMode: boolean, intervalMs: number = 5000): Promise<string> {
+export async function startTracking(
+  backgroundMode: boolean,
+  intervalMs: number = 5000,
+  forceUpdateBackground: boolean = false,
+  distanceFilter: number = 10
+): Promise<string> {
   try {
     console.log('🚀 Starting enhanced tracking with background_location_2 strategy');
     console.log('📤 Background mode:', backgroundMode);
     console.log('📤 Interval:', intervalMs, 'ms');
+    console.log('📤 Force update background:', forceUpdateBackground);
+    console.log('📤 Distance filter:', distanceFilter, 'm');
 
     // Request appropriate permissions
     if (backgroundMode) {
@@ -174,7 +183,7 @@ export async function startTracking(backgroundMode: boolean, intervalMs: number 
       }
     }
 
-    return await RnVietmapTrackingPlugin.startTracking(backgroundMode, intervalMs);
+    return await RnVietmapTrackingPlugin.startTracking(backgroundMode, intervalMs, forceUpdateBackground, distanceFilter);
   } catch (error) {
     console.error('Failed to start enhanced tracking:', error);
     throw error;

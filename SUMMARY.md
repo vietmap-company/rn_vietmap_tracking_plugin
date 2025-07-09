@@ -203,3 +203,21 @@ Package sẵn sàng để:
 - Extend thêm features
 
 Đây là một GPS tracking solution hoàn chỉnh, enterprise-ready với performance cao và dễ sử dụng!
+
+### 4. **Enhanced Background Tracking (background_location_2 Strategy)**
+- ✅ **Dual Tracking Modes**: Standard distance-filtered + Force update modes
+- ✅ **iOS Implementation**:
+  - Background task chaining for continuous updates
+  - BGTaskScheduler for iOS 13+ background processing
+  - Significant location changes as fallback
+  - Deferred location updates for battery optimization
+- ✅ **Android Implementation**:
+  - FusedLocationProviderClient with continuous requests
+  - Timer-based forced location updates
+  - Foreground service for long-running background tracking
+  - Intelligent throttling based on intervalMs
+- ✅ **Force Update Background Mode** (`forceUpdateBackground: true`):
+  - Timer-based location requests bypassing distance filters
+  - Continuous updates even during iOS system throttling periods
+  - Configurable intervals for different use cases
+  - Higher battery consumption but reliable background tracking

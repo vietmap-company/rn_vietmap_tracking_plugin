@@ -39,6 +39,9 @@ const GPSTrackingDemo = () => {
   const [customInterval, setCustomInterval] = useState('5000');
   const [customDistance, setCustomDistance] = useState('10');
   const [useCustomConfig, setUseCustomConfig] = useState(false);
+  const [forceUpdateBackground, setForceUpdateBackground] = useState(false);
+  const [customBackgroundMode, setCustomBackgroundMode] = useState(false);
+  const [customForceUpdateBackground, setCustomForceUpdateBackground] = useState(false);
 
   const trackingSession = useRef(new TrackingSession());
   const locationSubscription = useRef<any>(null);
@@ -59,6 +62,7 @@ const GPSTrackingDemo = () => {
   const setupSubscriptions = () => {
     // Location updates subscription
     locationSubscription.current = addLocationUpdateListener((location: LocationData) => {
+      console.log('📍 Timer:', new Date(location.timestamp).toLocaleTimeString());
       console.log('📍 New location:', location);
       setCurrentLocation(location);
       setLocationHistory(prev => [...prev.slice(-49), location]); // Keep last 50 locations
@@ -122,7 +126,7 @@ const GPSTrackingDemo = () => {
         intervalMs: parseInt(customInterval) || 5000,
         distanceFilter: parseInt(customDistance) || 10,
         accuracy: config.accuracy,
-        backgroundMode: config.backgroundMode,
+        backgroundMode: customBackgroundMode,
         notificationTitle: config.notificationTitle,
         notificationMessage: config.notificationMessage,
       };
@@ -140,8 +144,13 @@ const GPSTrackingDemo = () => {
       const activeConfig = getActiveConfig();
       console.log('🚀 Starting enhanced tracking with config:', activeConfig);
 
-      // Use enhanced tracking with background mode and interval
-      const result = await startTracking(activeConfig.backgroundMode, activeConfig.intervalMs);
+      // Use enhanced tracking with background mode, interval, forceUpdateBackground, and distanceFilter
+      const result = await startTracking(
+        activeConfig.backgroundMode,
+        activeConfig.intervalMs,
+        useCustomConfig ? customForceUpdateBackground : forceUpdateBackground,
+        activeConfig.distanceFilter
+      );
       console.log('✅ Enhanced tracking result:', result);
 
       trackingSession.current.start();
@@ -311,6 +320,16 @@ const GPSTrackingDemo = () => {
             />
           </View>
 
+          {!useCustomConfig && (
+            <View style={styles.switchRow}>
+              <Text style={styles.label}>Force Update Background (Preset):</Text>
+              <Switch
+                value={forceUpdateBackground}
+                onValueChange={setForceUpdateBackground}
+              />
+            </View>
+          )}
+
           {useCustomConfig && (
             <View style={styles.customInputs}>
               <View style={styles.inputRow}>
@@ -333,6 +352,22 @@ const GPSTrackingDemo = () => {
                   placeholder="10"
                 />
               </View>
+
+              <View style={styles.switchRow}>
+                <Text style={styles.label}>Background Mode (Custom):</Text>
+                <Switch
+                  value={customBackgroundMode}
+                  onValueChange={setCustomBackgroundMode}
+                />
+              </View>
+
+              <View style={styles.switchRow}>
+                <Text style={styles.label}>Force Update Background (Custom):</Text>
+                <Switch
+                  value={customForceUpdateBackground}
+                  onValueChange={setCustomForceUpdateBackground}
+                />
+              </View>
             </View>
           )}
         </View>
@@ -342,7 +377,9 @@ const GPSTrackingDemo = () => {
             Current: {useCustomConfig ? 'Custom' : 'Preset'} |
             Interval: {getActiveConfig().intervalMs}ms |
             Distance: {getActiveConfig().distanceFilter}m |
-            Accuracy: {getActiveConfig().accuracy}
+            Accuracy: {getActiveConfig().accuracy} |
+            Background: {getActiveConfig().backgroundMode ? '✅' : '❌'} |
+            Force Update: {useCustomConfig ? (customForceUpdateBackground ? '✅' : '❌') : (forceUpdateBackground ? '✅' : '❌')}
           </Text>
         </View>
       </View>

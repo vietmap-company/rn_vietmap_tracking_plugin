@@ -14,9 +14,11 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     // private var locationTimer: Timer? // DEPRECATED: No longer needed with continuous updates
     private var intervalMs: Int = 5000 // Default 5 seconds
     private var backgroundMode: Bool = false
+    private var forceUpdateBackground: Bool = false // New option for forced updates
     private var currentConfig: NSDictionary?
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
     private var isInBackground: Bool = false
+    private var locationTimer: Timer? // Timer for forced updates
 
     // Enhanced background processing support (iOS 13+)
     private var backgroundLocationTaskId = "com.rnvietmaptrackingplugin.background-location"
@@ -308,9 +310,9 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         locationManager.disallowDeferredLocationUpdates()
     }
 
-    @objc(startTracking:intervalMs:resolver:rejecter:)
-    func startTracking(backgroundMode: Bool, intervalMs: Int, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        print("🚀 Starting tracking - Background mode: \(backgroundMode), Interval: \(intervalMs)ms")
+    @objc(startTracking:intervalMs:forceUpdateBackground:distanceFilter:resolver:rejecter:)
+    func startTracking(backgroundMode: Bool, intervalMs: Int, forceUpdateBackground: Bool, distanceFilter: Double, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        print("🚀 Starting tracking - Background mode: \(backgroundMode), Interval: \(intervalMs)ms, Force update: \(forceUpdateBackground), Distance filter: \(distanceFilter)m")
 
         guard !isTracking else {
             print("⚠️ Already tracking")
@@ -320,6 +322,7 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
         self.backgroundMode = backgroundMode
         self.intervalMs = intervalMs
+        self.forceUpdateBackground = forceUpdateBackground
 
         // Validate location permissions
         let status = locationManager.authorizationStatus
@@ -335,15 +338,26 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             return
         }
 
-        // Configure location manager for continuous updates
-        configureLocationManagerForContinuousUpdates()
+        // Configure location manager based on force update mode
+        if forceUpdateBackground {
+            configureLocationManagerForForcedUpdates()
+        } else {
+            configureLocationManagerForContinuousUpdates()
+            // Set distance filter only for standard mode
+            locationManager.distanceFilter = distanceFilter
+            print("📏 Distance filter set to: \(distanceFilter)m")
+        }
 
         isTracking = true
         trackingStartTime = Date().timeIntervalSince1970
 
-        // Always use continuous location updates
-        print("🔄 Starting continuous location updates")
-        locationManager.startUpdatingLocation()
+        if forceUpdateBackground {
+            print("🔄 Starting forced location updates with timer")
+            startLocationTimer()
+        } else {
+            print("🔄 Starting continuous location updates")
+            locationManager.startUpdatingLocation()
+        }
 
         // If already in background, start background task chain
         if isInBackground {
@@ -351,7 +365,8 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         }
 
         sendTrackingStatusUpdate()
-        resolver("Tracking started with continuous updates")
+        let trackingMode = forceUpdateBackground ? "forced timer" : "continuous updates"
+        resolver("Tracking started with \(trackingMode)")
     }
 
     private func configureLocationManagerForContinuousUpdates() {
@@ -386,6 +401,54 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         print("⏰ Update interval: \(intervalMs)ms")
     }
 
+    private func configureLocationManagerForForcedUpdates() {
+        // Force update mode - request location on timer regardless of distance
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = kCLDistanceFilterNone // No distance filter
+
+        // Enable background location updates if needed
+        if backgroundMode && locationManager.authorizationStatus == .authorizedAlways {
+            locationManager.allowsBackgroundLocationUpdates = true
+            locationManager.pausesLocationUpdatesAutomatically = false
+            print("✅ Background location updates enabled for forced mode")
+        }
+
+        print("⚙️ Location manager configured for forced updates")
+        print("📍 Desired accuracy: \(locationManager.desiredAccuracy)")
+        print("📏 Distance filter: NONE (forced mode)")
+        print("🌙 Background mode: \(backgroundMode)")
+        print("⏰ Timer interval: \(intervalMs)ms")
+    }
+
+    private func startLocationTimer() {
+        // Stop existing timer
+        stopLocationTimer()
+
+        let interval = TimeInterval(intervalMs) / 1000.0
+        locationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.requestLocationUpdate()
+        }
+
+        print("⏰ Location timer started with interval: \(interval)s")
+    }
+
+    private func stopLocationTimer() {
+        locationTimer?.invalidate()
+        locationTimer = nil
+        print("⏰ Location timer stopped")
+    }
+
+    private func requestLocationUpdate() {
+        guard isTracking else {
+            print("⚠️ Not tracking - stopping timer")
+            stopLocationTimer()
+            return
+        }
+
+        print("🔄 Requesting forced location update (timer-based)")
+        locationManager.requestLocation()
+    }
+
     @objc(stopTracking:rejecter:)
     func stopTracking(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
         print("🛑 Stopping tracking")
@@ -403,6 +466,11 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         locationManager.stopMonitoringSignificantLocationChanges()
         locationManager.disallowDeferredLocationUpdates()
 
+        // Stop timer if in forced mode
+        if forceUpdateBackground {
+            stopLocationTimer()
+        }
+
         // Disable background location updates safely
         if backgroundMode && locationManager.authorizationStatus == .authorizedAlways {
             locationManager.allowsBackgroundLocationUpdates = false
@@ -412,6 +480,7 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         endBackgroundTask()
 
         backgroundMode = false
+        forceUpdateBackground = false
         sendTrackingStatusUpdate()
         print("✅ Tracking stopped")
         resolver("Tracking stopped")
@@ -567,34 +636,50 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
         let currentTime = Date().timeIntervalSince1970
 
-        // Enhanced throttling based on intervalMs for both foreground and background
-        let timeSinceLastUpdate = currentTime - lastLocationUpdate
-        let minimumInterval = Double(intervalMs) / 1000.0
+        if forceUpdateBackground {
+            // Force update mode - always send location, no throttling
+            print("✅ Location received (forced mode): lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
+            print("📊 Update info (forced timer mode):")
+            print("  - Background mode: \(backgroundMode)")
+            print("  - Is in background: \(isInBackground)")
+            print("  - Force update: \(forceUpdateBackground)")
+            print("  - Accuracy: \(location.horizontalAccuracy)m")
+            print("  - Speed: \(location.speed)m/s")
 
-        // Apply throttling for all modes to respect intervalMs parameter
-        if timeSinceLastUpdate < minimumInterval {
-            print("⏭️ Skipping location update - respecting intervalMs throttling")
-            print("  - Time since last: \(String(format: "%.1f", timeSinceLastUpdate))s")
-            print("  - Required interval: \(String(format: "%.1f", minimumInterval))s")
-            print("  - Background mode: \(backgroundMode), In background: \(isInBackground)")
-            return
+            lastLocationUpdate = currentTime
+            let locationDict = locationToDictionary(location)
+            sendEvent(withName: "onLocationUpdate", body: locationDict)
+            print("📡 Location event sent to React Native (forced mode)")
+        } else {
+            // Enhanced throttling based on intervalMs for both foreground and background
+            let timeSinceLastUpdate = currentTime - lastLocationUpdate
+            let minimumInterval = Double(intervalMs) / 1000.0
+
+            // Apply throttling for all modes to respect intervalMs parameter
+            if timeSinceLastUpdate < minimumInterval {
+                print("⏭️ Skipping location update - respecting intervalMs throttling")
+                print("  - Time since last: \(String(format: "%.1f", timeSinceLastUpdate))s")
+                print("  - Required interval: \(String(format: "%.1f", minimumInterval))s")
+                print("  - Background mode: \(backgroundMode), In background: \(isInBackground)")
+                return
+            }
+
+            print("✅ Location received: lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
+            print("📊 Update info (continuous mode):")
+            print("  - Background mode: \(backgroundMode)")
+            print("  - Is in background: \(isInBackground)")
+            print("  - Configured interval: \(intervalMs)ms")
+            print("  - Actual interval: \(Int(timeSinceLastUpdate * 1000))ms")
+            print("  - Accuracy: \(location.horizontalAccuracy)m")
+            print("  - Speed: \(location.speed)m/s")
+
+            lastLocationUpdate = currentTime
+
+            let locationDict = locationToDictionary(location)
+            sendEvent(withName: "onLocationUpdate", body: locationDict)
+
+            print("📡 Location event sent to React Native (continuous updates)")
         }
-
-        print("✅ Location received: lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
-        print("📊 Update info (continuous mode):")
-        print("  - Background mode: \(backgroundMode)")
-        print("  - Is in background: \(isInBackground)")
-        print("  - Configured interval: \(intervalMs)ms")
-        print("  - Actual interval: \(Int(timeSinceLastUpdate * 1000))ms")
-        print("  - Accuracy: \(location.horizontalAccuracy)m")
-        print("  - Speed: \(location.speed)m/s")
-
-        lastLocationUpdate = currentTime
-
-        let locationDict = locationToDictionary(location)
-        sendEvent(withName: "onLocationUpdate", body: locationDict)
-
-        print("📡 Location event sent to React Native (continuous updates)")
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

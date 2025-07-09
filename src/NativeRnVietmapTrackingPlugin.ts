@@ -5,7 +5,7 @@ export interface Spec extends TurboModule {
   multiply(a: number, b: number): number;
 
   // Enhanced tracking methods for background_location_2 strategy
-  startTracking(backgroundMode: boolean, intervalMs: number): Promise<string>;
+  startTracking(backgroundMode: boolean, intervalMs: number, forceUpdateBackground?: boolean, distanceFilter?: number): Promise<string>;
   stopTracking(): Promise<string>;
 
   getCurrentLocation(): Promise<Object>;

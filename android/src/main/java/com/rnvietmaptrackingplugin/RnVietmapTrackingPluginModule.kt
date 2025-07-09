@@ -16,6 +16,8 @@ import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.OnCompleteListener
+import java.util.Timer
+import java.util.TimerTask
 
 @ReactModule(name = RnVietmapTrackingPluginModule.NAME)
 class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
@@ -30,6 +32,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var backgroundLocationService: Intent? = null
   private var intervalMs: Long = 5000 // Default 5 seconds
   private var backgroundMode = false
+  private var forceUpdateBackground = false // New option for forced updates
+  private var distanceFilter = 10.0 // Default 10 meters
+  private var locationTimer: Timer? = null // Timer for forced updates
   private var currentConfig: ReadableMap? = null
 
   // Permission request handling
@@ -260,8 +265,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
   // Enhanced tracking methods for background_location_2 strategy
   @ReactMethod
-  fun startTracking(backgroundMode: Boolean, intervalMs: Int, promise: Promise) {
-    println("🚀 Starting enhanced tracking - Background mode: $backgroundMode, Interval: ${intervalMs}ms")
+  fun startTracking(backgroundMode: Boolean, intervalMs: Int, forceUpdateBackground: Boolean = false, distanceFilter: Double = 10.0, promise: Promise) {
+    println("🚀 Starting enhanced tracking - Background mode: $backgroundMode, Interval: ${intervalMs}ms, Force update: $forceUpdateBackground, Distance filter: ${distanceFilter}m")
 
     if (isTracking) {
       println("⚠️ Already tracking")
@@ -271,6 +276,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
     this.backgroundMode = backgroundMode
     this.intervalMs = intervalMs.toLong()
+    this.forceUpdateBackground = forceUpdateBackground
+    this.distanceFilter = distanceFilter
 
     // Check permissions
     if (!hasLocationPermission()) {
@@ -284,20 +291,31 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
 
     try {
-      configureLocationRequestForContinuousUpdates()
+      // Configure location request based on force update mode
+      if (forceUpdateBackground) {
+        configureLocationRequestForForcedUpdates()
+      } else {
+        configureLocationRequestForContinuousUpdates()
+      }
+
       isTracking = true
       trackingStartTime = System.currentTimeMillis()
 
-      // Start continuous location updates (background_location_2 strategy)
-      println("🔄 Starting continuous location updates")
-      fusedLocationClient?.requestLocationUpdates(locationRequest!!, locationCallback!!, Looper.getMainLooper())
+      if (forceUpdateBackground) {
+        println("🔄 Starting forced location updates with timer")
+        startLocationTimer()
+      } else {
+        println("🔄 Starting continuous location updates")
+        fusedLocationClient?.requestLocationUpdates(locationRequest!!, locationCallback!!, Looper.getMainLooper())
+      }
 
       if (backgroundMode) {
         startBackgroundLocationService()
       }
 
       sendTrackingStatusUpdate()
-      promise.resolve("Enhanced tracking started with continuous updates")
+      val trackingMode = if (forceUpdateBackground) "forced timer" else "continuous updates"
+      promise.resolve("Enhanced tracking started with $trackingMode")
     } catch (e: Exception) {
       println("❌ Failed to start enhanced tracking: ${e.message}")
       promise.reject("START_ERROR", "Failed to start tracking: ${e.message}")
@@ -317,14 +335,22 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     try {
       isTracking = false
 
-      // Stop continuous location updates
-      fusedLocationClient?.removeLocationUpdates(locationCallback!!)
+      // Stop location services based on mode
+      if (forceUpdateBackground) {
+        stopLocationTimer()
+      } else {
+        fusedLocationClient?.removeLocationUpdates(locationCallback!!)
+      }
 
       // Stop background service
       backgroundLocationService?.let {
         reactApplicationContext.stopService(it)
         backgroundLocationService = null
       }
+
+      // Reset flags
+      backgroundMode = false
+      forceUpdateBackground = false
 
       sendTrackingStatusUpdate()
       promise.resolve("Enhanced tracking stopped")
@@ -339,6 +365,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       // Use continuous updates with throttling in callback
       interval = 1000L // 1 second for continuous updates
       fastestInterval = 500L // 0.5 seconds minimum
+      smallestDisplacement = distanceFilter.toFloat() // Set distance filter
       priority = if (backgroundMode) {
         LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY
       } else {
@@ -356,6 +383,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     println("⚙️ Location request configured for continuous updates")
     println("📍 Priority: ${locationRequest?.priority}")
     println("⏰ Update interval: ${locationRequest?.interval}ms")
+    println("📏 Distance filter: ${distanceFilter}m")
   }
 
   private fun handleLocationUpdate(location: Location) {
@@ -419,5 +447,101 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       println("🌙 Starting background location service")
       // Implementation for background service if needed
     }
+  }
+
+  private fun configureLocationRequestForForcedUpdates() {
+    // Force update mode - request location on timer regardless of distance
+    locationRequest = LocationRequest.create().apply {
+      interval = intervalMs // Use configured interval
+      fastestInterval = intervalMs / 2 // Half the interval for fastest
+      priority = LocationRequest.PRIORITY_HIGH_ACCURACY // High accuracy for forced mode
+      smallestDisplacement = 0f // No distance filter
+    }
+
+    locationCallback = object : LocationCallback() {
+      override fun onLocationResult(locationResult: LocationResult) {
+        val location = locationResult.lastLocation ?: return
+        handleLocationUpdateForced(location)
+      }
+    }
+
+    println("⚙️ Location request configured for forced updates")
+    println("📍 Priority: HIGH_ACCURACY")
+    println("📏 Distance filter: NONE (forced mode)")
+    println("⏰ Timer interval: ${intervalMs}ms")
+  }
+
+  private fun startLocationTimer() {
+    // Stop existing timer
+    stopLocationTimer()
+
+    val timer = Timer()
+    locationTimer = timer
+
+    val interval = intervalMs
+    timer.scheduleAtFixedRate(object : TimerTask() {
+      override fun run() {
+        requestLocationUpdate()
+      }
+    }, 0, interval)
+
+    println("⏰ Location timer started with interval: ${interval}ms")
+  }
+
+  private fun stopLocationTimer() {
+    locationTimer?.cancel()
+    locationTimer = null
+    println("⏰ Location timer stopped")
+  }
+
+  private fun requestLocationUpdate() {
+    if (!isTracking) {
+      println("⚠️ Not tracking - stopping timer")
+      stopLocationTimer()
+      return
+    }
+
+    println("🔄 Requesting forced location update (timer-based)")
+    try {
+      if (ActivityCompat.checkSelfPermission(
+          reactApplicationContext,
+          Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+      ) {
+        fusedLocationClient?.lastLocation?.addOnSuccessListener { location ->
+          if (location != null) {
+            handleLocationUpdateForced(location)
+          }
+        }
+      }
+    } catch (e: Exception) {
+      println("❌ Error requesting forced location update: ${e.message}")
+    }
+  }
+
+  private fun handleLocationUpdateForced(location: Location) {
+    val currentTime = System.currentTimeMillis()
+
+    println("✅ Location received (forced mode): lat=${location.latitude}, lon=${location.longitude}")
+    println("📊 Update info (forced timer mode):")
+    println("  - Background mode: $backgroundMode")
+    println("  - Force update: $forceUpdateBackground")
+    println("  - Accuracy: ${location.accuracy}m")
+    println("  - Speed: ${location.speed}m/s")
+
+    lastLocationUpdate = currentTime
+
+    val locationData = WritableNativeMap().apply {
+      putDouble("latitude", location.latitude)
+      putDouble("longitude", location.longitude)
+      putDouble("altitude", location.altitude)
+      putDouble("accuracy", location.accuracy.toDouble())
+      putDouble("speed", location.speed.toDouble())
+      putDouble("bearing", location.bearing.toDouble())
+      putDouble("timestamp", location.time.toDouble())
+    }
+
+    sendEvent("onLocationUpdate", locationData)
+    println("📡 Location event sent to React Native (forced mode)")
   }
 }
