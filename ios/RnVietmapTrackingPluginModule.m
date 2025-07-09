@@ -12,11 +12,13 @@
 
 RCT_EXTERN_METHOD(multiply:(double)a b:(double)b)
 
-RCT_EXTERN_METHOD(startLocationTracking:(NSDictionary *)config
+// Enhanced tracking methods for background_location_2 strategy
+RCT_EXTERN_METHOD(startTracking:(BOOL)backgroundMode
+                  intervalMs:(int)intervalMs
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(stopLocationTracking:(RCTPromiseResolveBlock)resolve
+RCT_EXTERN_METHOD(stopTracking:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(getCurrentLocation:(RCTPromiseResolveBlock)resolve
@@ -36,6 +38,9 @@ RCT_EXTERN_METHOD(requestLocationPermissions:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(hasLocationPermissions:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(requestAlwaysLocationPermissions:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 + (BOOL)requiresMainQueueSetup

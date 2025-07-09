@@ -11,8 +11,8 @@ import {
   StatusBar,
 } from 'react-native';
 import {
-  startLocationTracking,
-  stopLocationTracking,
+  startTracking,
+  stopTracking,
   getCurrentLocation,
   addLocationUpdateListener,
   addTrackingStatusListener,
@@ -138,30 +138,31 @@ const GPSTrackingDemo = () => {
 
     try {
       const activeConfig = getActiveConfig();
-      console.log('🚀 Starting tracking with config:', activeConfig);
+      console.log('🚀 Starting enhanced tracking with config:', activeConfig);
 
-      const success = await startLocationTracking(activeConfig);
-      if (success) {
-        trackingSession.current.start();
-        Alert.alert('✅ Success', 'GPS tracking started');
-      }
+      // Use enhanced tracking with background mode and interval
+      const result = await startTracking(activeConfig.backgroundMode, activeConfig.intervalMs);
+      console.log('✅ Enhanced tracking result:', result);
+
+      trackingSession.current.start();
+      Alert.alert('✅ Success', 'Enhanced GPS tracking started');
     } catch (error) {
-      console.error('Error starting tracking:', error);
-      Alert.alert('❌ Error', 'Failed to start tracking');
+      console.error('Error starting enhanced tracking:', error);
+      Alert.alert('❌ Error', 'Failed to start enhanced tracking');
     }
   };
 
   const handleStopTracking = async () => {
     try {
-      const success = await stopLocationTracking();
-      if (success) {
-        trackingSession.current.clear();
-        setSessionStats(null);
-        Alert.alert('✅ Success', 'GPS tracking stopped');
-      }
+      const result = await stopTracking();
+      console.log('✅ Enhanced tracking stopped:', result);
+
+      trackingSession.current.clear();
+      setSessionStats(null);
+      Alert.alert('✅ Success', 'Enhanced GPS tracking stopped');
     } catch (error) {
-      console.error('Error stopping tracking:', error);
-      Alert.alert('❌ Error', 'Failed to stop tracking');
+      console.error('Error stopping enhanced tracking:', error);
+      Alert.alert('❌ Error', 'Failed to stop enhanced tracking');
     }
   };
 

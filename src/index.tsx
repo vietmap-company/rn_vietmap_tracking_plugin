@@ -19,42 +19,6 @@ export function multiply(a: number, b: number): number {
 }
 
 /**
- * Start GPS location tracking with specified configuration
- * @param config - Configuration for location tracking
- * @returns Promise<boolean> - Success status
- */
-export async function startLocationTracking(config: LocationTrackingConfig): Promise<boolean> {
-  try {
-    // Debug: Log config before sending to native
-    console.log('📤 Sending config to native:', JSON.stringify(config, null, 2));
-    console.log('📤 Config intervalMs:', config.intervalMs);
-    console.log('📤 Config keys:', Object.keys(config));
-
-    // Request permissions first
-    const hasPermission = await RnVietmapTrackingPlugin.hasLocationPermissions();
-    if (!hasPermission) {
-      const permissionResult = await RnVietmapTrackingPlugin.requestLocationPermissions();
-      if (permissionResult !== 'granted') {
-        throw new Error('Location permission denied');
-      }
-    }
-
-    return await RnVietmapTrackingPlugin.startLocationTracking(config);
-  } catch (error) {
-    console.error('Failed to start location tracking:', error);
-    throw error;
-  }
-}
-
-/**
- * Stop GPS location tracking
- * @returns Promise<boolean> - Success status
- */
-export async function stopLocationTracking(): Promise<boolean> {
-  return RnVietmapTrackingPlugin.stopLocationTracking();
-}
-
-/**
  * Get current location immediately
  * @returns Promise<LocationData> - Current location data
  */
@@ -103,6 +67,14 @@ export async function requestLocationPermissions(): Promise<string> {
  */
 export async function hasLocationPermissions(): Promise<boolean> {
   return RnVietmapTrackingPlugin.hasLocationPermissions();
+}
+
+/**
+ * Request "Always" location permissions for background tracking
+ * @returns Promise<string> - Permission status
+ */
+export async function requestAlwaysLocationPermissions(): Promise<string> {
+  return RnVietmapTrackingPlugin.requestAlwaysLocationPermissions();
 }
 
 /**
@@ -168,6 +140,59 @@ export function createDefaultConfig(intervalMs: number = 5000): LocationTracking
   }
 
   return config;
+}
+
+/**
+ * Enhanced GPS tracking methods using background_location_2 strategy
+ */
+
+/**
+ * Start GPS tracking with continuous location updates
+ * @param backgroundMode - Enable background tracking (requires 'Always' permission)
+ * @param intervalMs - Update interval in milliseconds for throttling
+ * @returns Promise<string> - Status message
+ */
+export async function startTracking(backgroundMode: boolean, intervalMs: number = 5000): Promise<string> {
+  try {
+    console.log('🚀 Starting enhanced tracking with background_location_2 strategy');
+    console.log('📤 Background mode:', backgroundMode);
+    console.log('📤 Interval:', intervalMs, 'ms');
+
+    // Request appropriate permissions
+    if (backgroundMode) {
+      const alwaysPermission = await RnVietmapTrackingPlugin.requestAlwaysLocationPermissions();
+      if (alwaysPermission !== 'granted') {
+        throw new Error('Background tracking requires "Always" location permission');
+      }
+    } else {
+      const hasPermission = await RnVietmapTrackingPlugin.hasLocationPermissions();
+      if (!hasPermission) {
+        const permissionResult = await RnVietmapTrackingPlugin.requestLocationPermissions();
+        if (permissionResult !== 'granted') {
+          throw new Error('Location permission denied');
+        }
+      }
+    }
+
+    return await RnVietmapTrackingPlugin.startTracking(backgroundMode, intervalMs);
+  } catch (error) {
+    console.error('Failed to start enhanced tracking:', error);
+    throw error;
+  }
+}
+
+/**
+ * Stop GPS tracking
+ * @returns Promise<string> - Status message
+ */
+export async function stopTracking(): Promise<string> {
+  try {
+    console.log('🛑 Stopping enhanced tracking');
+    return await RnVietmapTrackingPlugin.stopTracking();
+  } catch (error) {
+    console.error('Failed to stop enhanced tracking:', error);
+    throw error;
+  }
 }
 
 // Export utilities and presets

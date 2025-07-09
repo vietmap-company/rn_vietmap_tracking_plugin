@@ -16,7 +16,6 @@ import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.OnCompleteListener
-import java.util.*
 
 @ReactModule(name = RnVietmapTrackingPluginModule.NAME)
 class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
@@ -29,7 +28,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var trackingStartTime: Long = 0
   private var lastLocationUpdate: Long = 0
   private var backgroundLocationService: Intent? = null
-  private var locationTimer: Timer? = null
   private var intervalMs: Long = 5000 // Default 5 seconds
   private var backgroundMode = false
   private var currentConfig: ReadableMap? = null
@@ -53,112 +51,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   // Example method
   override fun multiply(a: Double, b: Double): Double {
     return a * b
-  }  override fun startLocationTracking(config: ReadableMap, promise: Promise) {
-    try {
-      // Debug: Log received config
-      Log.d("VietmapTracking", "📋 Received config: ${config.toString()}")
-
-      // Log all keys in config
-      val keys = mutableListOf<String>()
-      val iterator = config.keySetIterator()
-      while (iterator.hasNextKey()) {
-        keys.add(iterator.nextKey())
-      }
-      Log.d("VietmapTracking", "📋 Config keys: $keys")
-
-      if (config.hasKey("intervalMs")) {
-        Log.d("VietmapTracking", "✅ intervalMs key exists: ${config.getInt("intervalMs")}")
-      } else {
-        Log.e("VietmapTracking", "❌ intervalMs key NOT found in config!")
-      }
-
-      if (!hasLocationPermissions()) {
-        promise.reject("PERMISSION_DENIED", "Location permissions are required")
-        return
-      }
-
-      // Store configuration
-      currentConfig = config
-      intervalMs = if (config.hasKey("intervalMs")) config.getInt("intervalMs").toLong() else 5000L
-      val distanceFilter = config.getDouble("distanceFilter").toFloat()
-      val accuracy = config.getString("accuracy") ?: "high"
-      backgroundMode = config.getBoolean("backgroundMode")
-
-      Log.d("VietmapTracking", "📊 Parsed config values:")
-      Log.d("VietmapTracking", "  - intervalMs: ${intervalMs}")
-      Log.d("VietmapTracking", "  - distanceFilter: ${distanceFilter}")
-      Log.d("VietmapTracking", "  - accuracy: ${accuracy}")
-      Log.d("VietmapTracking", "  - backgroundMode: ${backgroundMode}")
-
-      // Create location request with longer interval for battery optimization
-      locationRequest = LocationRequest.create().apply {
-        this.interval = intervalMs
-        this.fastestInterval = intervalMs / 2
-        this.smallestDisplacement = distanceFilter
-        this.priority = when (accuracy) {
-          "high" -> LocationRequest.PRIORITY_HIGH_ACCURACY
-          "medium" -> LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY
-          "low" -> LocationRequest.PRIORITY_LOW_POWER
-          else -> LocationRequest.PRIORITY_HIGH_ACCURACY
-        }
-      }
-
-      // Create location callback
-      locationCallback = object : LocationCallback() {
-        override fun onLocationResult(locationResult: LocationResult) {
-          locationResult.lastLocation?.let { location ->
-            lastLocationUpdate = System.currentTimeMillis()
-            sendLocationUpdate(location)
-          }
-        }
-      }
-
-      // Start location updates
-      if (ContextCompat.checkSelfPermission(reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-        isTracking = true
-        trackingStartTime = System.currentTimeMillis()
-
-        // Start timer-based location tracking after setting isTracking = true
-        startLocationTimer()
-
-        // Start foreground service for background tracking
-        if (backgroundMode) {
-          startBackgroundLocationService(config)
-        }
-
-        sendTrackingStatusUpdate()
-        promise.resolve(true)
-      } else {
-        promise.reject("PERMISSION_DENIED", "Location permissions are required")
-      }
-    } catch (e: Exception) {
-      promise.reject("ERROR", e.message)
-    }
-  }
-
-  override fun stopLocationTracking(promise: Promise) {
-    try {
-      // Stop timer
-      stopLocationTimer()
-
-      if (locationCallback != null) {
-        fusedLocationClient?.removeLocationUpdates(locationCallback!!)
-      }
-
-      // Stop background service
-      backgroundLocationService?.let {
-        reactApplicationContext.stopService(it)
-        backgroundLocationService = null
-      }
-
-      isTracking = false
-      backgroundMode = false
-      currentConfig = null
-      sendTrackingStatusUpdate()
-      promise.resolve(true)
-    } catch (e: Exception) {
-      promise.reject("ERROR", e.message)
-    }
   }
 
   override fun getCurrentLocation(promise: Promise) {
@@ -203,13 +95,19 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
 
     try {
-      // Stop current tracking
-      locationCallback?.let {
-        fusedLocationClient?.removeLocationUpdates(it)
+      // Update interval if provided
+      if (config.hasKey("intervalMs")) {
+        intervalMs = config.getInt("intervalMs").toLong()
+        println("🔄 Updated tracking interval to: ${intervalMs}ms")
       }
 
-      // Start with new config
-      startLocationTracking(config, promise)
+      // Update background mode if provided
+      if (config.hasKey("backgroundMode")) {
+        backgroundMode = config.getBoolean("backgroundMode")
+        println("🔄 Updated background mode to: $backgroundMode")
+      }
+
+      promise.resolve(true)
     } catch (e: Exception) {
       promise.reject("ERROR", e.message)
     }
@@ -306,6 +204,20 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     return hasPermissions
   }
 
+  override fun requestAlwaysLocationPermissions(promise: Promise) {
+    // On Android, there's no separate "Always" permission like iOS
+    // Background location access is controlled by targetSdkVersion and manifest permissions
+    // For API consistency, we'll just return the same as regular permission request
+    Log.d("VietmapTracking", "🔐 Android: Always permission request - delegating to regular permission check")
+
+    if (hasLocationPermissions()) {
+      promise.resolve("granted")
+    } else {
+      // Delegate to regular permission request
+      requestLocationPermissions(promise)
+    }
+  }
+
   private fun createLocationMap(location: Location): WritableMap {
     return Arguments.createMap().apply {
       putDouble("latitude", location.latitude)
@@ -344,66 +256,168 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       putExtra("config", Arguments.toBundle(config))
     }
     reactApplicationContext.startForegroundService(backgroundLocationService)
-  }  // Timer-based location tracking methods
-  private fun startLocationTimer() {
-    stopLocationTimer() // Stop any existing timer
-
-    println("Starting location timer with interval: ${intervalMs}ms")
-
-    locationTimer = Timer()
-    locationTimer?.scheduleAtFixedRate(object : TimerTask() {
-      override fun run() {
-        println("Timer fired - requesting location update")
-        requestLocationUpdate()
-      }
-    }, 0, intervalMs) // Start immediately, then repeat every intervalMs
   }
 
-  private fun stopLocationTimer() {
-    locationTimer?.cancel()
-    locationTimer = null
-  }
+  // Enhanced tracking methods for background_location_2 strategy
+  @ReactMethod
+  fun startTracking(backgroundMode: Boolean, intervalMs: Int, promise: Promise) {
+    println("🚀 Starting enhanced tracking - Background mode: $backgroundMode, Interval: ${intervalMs}ms")
 
-  private fun requestLocationUpdate() {
-    println("📝 requestLocationUpdate called - isTracking: $isTracking")
-
-    if (!isTracking) {
-      println("⚠️ Not tracking, skipping location request")
+    if (isTracking) {
+      println("⚠️ Already tracking")
+      promise.resolve("Already tracking")
       return
     }
 
-    if (ContextCompat.checkSelfPermission(reactApplicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-      // Request a fresh location update instead of using cached location
-      locationRequest?.let { request ->
-        val singleLocationCallback = object : LocationCallback() {
-          override fun onLocationResult(locationResult: LocationResult) {
-            locationResult.lastLocation?.let { location ->
-              lastLocationUpdate = System.currentTimeMillis()
-              sendLocationUpdate(location)
-            }
-            // Remove this single-use callback
-            fusedLocationClient?.removeLocationUpdates(this)
-          }
-        }
+    this.backgroundMode = backgroundMode
+    this.intervalMs = intervalMs.toLong()
 
-        // Request a single fresh location update
-        fusedLocationClient?.requestLocationUpdates(
-          request,
-          singleLocationCallback,
-          Looper.getMainLooper()
-        )
+    // Check permissions
+    if (!hasLocationPermission()) {
+      promise.reject("PERMISSION_ERROR", "Location permission required")
+      return
+    }
+
+    if (backgroundMode && !hasBackgroundLocationPermission()) {
+      promise.reject("PERMISSION_ERROR", "Background location permission required for background mode")
+      return
+    }
+
+    try {
+      configureLocationRequestForContinuousUpdates()
+      isTracking = true
+      trackingStartTime = System.currentTimeMillis()
+
+      // Start continuous location updates (background_location_2 strategy)
+      println("🔄 Starting continuous location updates")
+      fusedLocationClient?.requestLocationUpdates(locationRequest!!, locationCallback!!, Looper.getMainLooper())
+
+      if (backgroundMode) {
+        startBackgroundLocationService()
       }
+
+      sendTrackingStatusUpdate()
+      promise.resolve("Enhanced tracking started with continuous updates")
+    } catch (e: Exception) {
+      println("❌ Failed to start enhanced tracking: ${e.message}")
+      promise.reject("START_ERROR", "Failed to start tracking: ${e.message}")
+    }
+  }
+
+  @ReactMethod
+  fun stopTracking(promise: Promise) {
+    println("🛑 Stopping enhanced tracking")
+
+    if (!isTracking) {
+      println("⚠️ Not currently tracking")
+      promise.resolve("Not tracking")
+      return
+    }
+
+    try {
+      isTracking = false
+
+      // Stop continuous location updates
+      fusedLocationClient?.removeLocationUpdates(locationCallback!!)
+
+      // Stop background service
+      backgroundLocationService?.let {
+        reactApplicationContext.stopService(it)
+        backgroundLocationService = null
+      }
+
+      sendTrackingStatusUpdate()
+      promise.resolve("Enhanced tracking stopped")
+    } catch (e: Exception) {
+      println("❌ Failed to stop enhanced tracking: ${e.message}")
+      promise.reject("STOP_ERROR", "Failed to stop tracking: ${e.message}")
+    }
+  }
+
+  private fun configureLocationRequestForContinuousUpdates() {
+    locationRequest = LocationRequest.create().apply {
+      // Use continuous updates with throttling in callback
+      interval = 1000L // 1 second for continuous updates
+      fastestInterval = 500L // 0.5 seconds minimum
+      priority = if (backgroundMode) {
+        LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY
+      } else {
+        LocationRequest.PRIORITY_HIGH_ACCURACY
+      }
+    }
+
+    locationCallback = object : LocationCallback() {
+      override fun onLocationResult(locationResult: LocationResult) {
+        val location = locationResult.lastLocation ?: return
+        handleLocationUpdate(location)
+      }
+    }
+
+    println("⚙️ Location request configured for continuous updates")
+    println("📍 Priority: ${locationRequest?.priority}")
+    println("⏰ Update interval: ${locationRequest?.interval}ms")
+  }
+
+  private fun handleLocationUpdate(location: Location) {
+    val currentTime = System.currentTimeMillis()
+
+    // Enhanced throttling based on intervalMs for both foreground and background
+    val timeSinceLastUpdate = currentTime - lastLocationUpdate
+
+    if (timeSinceLastUpdate < intervalMs) {
+      println("⏭️ Skipping location update - respecting intervalMs throttling")
+      println("  - Time since last: ${timeSinceLastUpdate}ms")
+      println("  - Required interval: ${intervalMs}ms")
+      return
+    }
+
+    println("✅ Location received: lat=${location.latitude}, lon=${location.longitude}")
+    println("📊 Update info (continuous mode):")
+    println("  - Background mode: $backgroundMode")
+    println("  - Configured interval: ${intervalMs}ms")
+    println("  - Actual interval: ${timeSinceLastUpdate}ms")
+    println("  - Accuracy: ${location.accuracy}m")
+
+    lastLocationUpdate = currentTime
+
+    val locationData = WritableNativeMap().apply {
+      putDouble("latitude", location.latitude)
+      putDouble("longitude", location.longitude)
+      putDouble("altitude", location.altitude)
+      putDouble("accuracy", location.accuracy.toDouble())
+      putDouble("speed", location.speed.toDouble())
+      putDouble("bearing", location.bearing.toDouble())
+      putDouble("timestamp", location.time.toDouble())
+    }
+
+    sendEvent("onLocationUpdate", locationData)
+    println("📡 Location event sent to React Native (continuous updates)")
+  }
+
+  // Permission helper methods for enhanced tracking
+  private fun hasLocationPermission(): Boolean {
+    return ContextCompat.checkSelfPermission(
+      reactApplicationContext,
+      Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+  }
+
+  private fun hasBackgroundLocationPermission(): Boolean {
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+      ContextCompat.checkSelfPermission(
+        reactApplicationContext,
+        Manifest.permission.ACCESS_BACKGROUND_LOCATION
+      ) == PackageManager.PERMISSION_GRANTED
     } else {
-      // Send error event for missing permissions
-      val errorInfo = Arguments.createMap().apply {
-        putString("error", "Location permissions are required")
-        putString("code", "PERMISSION_DENIED")
-        putDouble("timestamp", System.currentTimeMillis().toDouble())
-      }
+      // Background location permission is not required before Android 10
+      hasLocationPermission()
+    }
+  }
 
-      reactApplicationContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        .emit("onLocationError", errorInfo)
+  private fun startBackgroundLocationService() {
+    if (backgroundMode && hasBackgroundLocationPermission()) {
+      println("🌙 Starting background location service")
+      // Implementation for background service if needed
     }
   }
 }
