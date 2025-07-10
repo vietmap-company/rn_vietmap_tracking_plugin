@@ -34,6 +34,17 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     private var currentAlerts: [[Any]]?
     private var routeOffset: [Any]?
 
+    // MARK: - Route Boundary Detection & API Management
+    private var currentLinkIndex: Int?
+    private var routeBoundaryThreshold: Double = 50.0 // meters
+    private var lastAPIRequestLocation: CLLocation?
+    private var apiRequestInProgress: Bool = false
+    private var speedLimitAlerts: [String: Any] = [:]
+    private var routeAPIEndpoint: String?
+
+    // Callback for route API updates
+    private var onRouteUpdateCallback: ((Bool, [String: Any]?) -> Void)?
+
     override init() {
         super.init()
         locationManager = CLLocationManager()
@@ -714,7 +725,18 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             sendEvent(withName: "onLocationUpdate", body: locationDict)
 
             print("📡 Location event sent to React Native (continuous updates)")
+        }        // MARK: - Route Boundary Detection & API Management
+
+        // Update current link index based on location
+        updateCurrentLinkIndex(for: location)
+
+        // Check if we need to request new route data from the server
+        if shouldRequestNewRouteData(for: location) {
+            requestRouteDataFromAPI(for: location)
         }
+
+        // Check speed limits if we have route data
+        checkSpeedLimitsForCurrentLocation(location)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -1227,5 +1249,338 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
     private func sendSpeedAlertEvent(_ alertData: [String: Any]) {
         print("🚨 Speed violation detected!")
         sendEvent(withName: "onSpeedAlert", body: alertData)
+    }
+
+    // MARK: - Route Boundary Detection & API Management
+
+    private func updateCurrentLinkIndex(location: CLLocation) {
+        guard let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]] else {
+            return
+        }
+
+        // Find the closest link to the current location
+        var closestLinkIndex: Int?
+        var minDistance = Double.infinity
+
+        for (index, link) in links.enumerated() {
+            if let startLat = link["startLat"] as? Double,
+               let startLon = link["startLon"] as? Double,
+               let endLat = link["endLat"] as? Double,
+               let endLon = link["endLon"] as? Double {
+
+                // Calculate distance to the link segment
+                let distance = distanceToLineSegment(
+                    pointLat: location.coordinate.latitude, pointLon: location.coordinate.longitude,
+                    startLat: startLat, startLon: startLon,
+                    endLat: endLat, endLon: endLon
+                )
+
+                if distance < minDistance {
+                    minDistance = distance
+                    closestLinkIndex = index
+                }
+            }
+        }
+
+        // Update the current link index if it's different
+        if closestLinkIndex != currentLinkIndex {
+            currentLinkIndex = closestLinkIndex
+            print("📍 Current link index updated: \(currentLinkIndex ?? -1)")
+        }
+    }
+
+    private func shouldRequestRouteData(location: CLLocation) -> Bool {
+        // Don't request new data if there's an ongoing request
+        if apiRequestInProgress {
+            return false
+        }
+
+        // Request new data if the location is significantly different from the last request
+        if let lastLocation = lastAPIRequestLocation {
+            let distance = lastLocation.distance(from: location)
+            return distance > routeBoundaryThreshold
+        }
+
+        return true
+    }
+
+    private func requestRouteData(location: CLLocation) {
+        // Mark the request as in progress
+        apiRequestInProgress = true
+
+        // Update the last requested location
+        lastAPIRequestLocation = location
+
+        // Here you would perform the actual API request to fetch new route data
+        // For demonstration, we'll just simulate a successful response after a delay
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            // Simulate a successful response with dummy data
+            let dummyResponse: [String: Any] = [
+                "links": [],
+                "alerts": [],
+                "offset": [],
+                "timestamp": Date().timeIntervalSince1970 * 1000
+            ]
+
+            // Update the route data with the new response
+            self.currentRouteData = dummyResponse
+
+            // Call the callback if set
+            self.onRouteUpdateCallback?(true, dummyResponse)
+
+            // Mark the request as not in progress
+            self.apiRequestInProgress = false
+
+            print("✅ Route data updated via API")
+        }
+    }
+
+    // MARK: - API Management
+
+    @objc(setRouteAPIEndpoint:resolver:rejecter:)
+    func setRouteAPIEndpoint(endpoint: String, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        routeAPIEndpoint = endpoint
+        print("🗺️ Route API endpoint set: \(endpoint)")
+        resolver(true)
+    }
+
+    @objc(enableRouteBoundaryDetection:resolver:rejecter:)
+    func enableRouteBoundaryDetection(threshold: Double, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        routeBoundaryThreshold = threshold
+        print("🎯 Route boundary detection enabled with threshold: \(threshold)m")
+        resolver(true)
+    }
+
+    private func isLocationWithinCurrentRoute(location: CLLocation) -> Bool {
+        guard let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]],
+              let currentIndex = currentLinkIndex,
+              currentIndex < links.count else {
+            return false
+        }
+
+        let currentLink = links[currentIndex]
+
+        // Check distance to current link
+        if let startLat = currentLink["startLat"] as? Double,
+           let startLon = currentLink["startLon"] as? Double,
+           let endLat = currentLink["endLat"] as? Double,
+           let endLon = currentLink["endLon"] as? Double {
+
+            let distance = distanceToLineSegment(
+                pointLat: location.coordinate.latitude,
+                pointLon: location.coordinate.longitude,
+                startLat: startLat, startLon: startLon,
+                endLat: endLat, endLon: endLon
+            )
+
+            return distance <= routeBoundaryThreshold
+        }
+
+        return false
+    }
+
+    private func shouldRequestNewRouteData(for location: CLLocation) -> Bool {
+        // Don't request if API call is already in progress
+        if apiRequestInProgress {
+            return false
+        }
+
+        // Request if no route data exists
+        guard currentRouteData != nil else {
+            return true
+        }
+
+        // Request if location is outside current route
+        if !isLocationWithinCurrentRoute(location: location) {
+            print("📍 Location outside current route - requesting new route data")
+            return true
+        }
+
+        // Request if significantly moved from last API request location
+        if let lastAPILocation = lastAPIRequestLocation {
+            let distance = location.distance(from: lastAPILocation)
+            if distance > 1000 { // 1km threshold
+                print("📍 Moved 1km from last API request - requesting updated route data")
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func requestRouteDataFromAPI(for location: CLLocation) {
+        guard let apiEndpoint = routeAPIEndpoint, !apiRequestInProgress else {
+            print("❌ No API endpoint set or request in progress")
+            return
+        }
+
+        apiRequestInProgress = true
+        lastAPIRequestLocation = location
+
+        print("🌐 Requesting route data from API for location: \(location.coordinate.latitude), \(location.coordinate.longitude)")
+
+        // Create API request
+        let urlString = "\(apiEndpoint)?lat=\(location.coordinate.latitude)&lon=\(location.coordinate.longitude)"
+        guard let url = URL(string: urlString) else {
+            apiRequestInProgress = false
+            return
+        }
+
+        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.apiRequestInProgress = false
+
+                if let error = error {
+                    print("❌ Route API request failed: \(error.localizedDescription)")
+                    self?.onRouteUpdateCallback?(false, nil)
+                    return
+                }
+
+                guard let data = data else {
+                    print("❌ No data received from route API")
+                    self?.onRouteUpdateCallback?(false, nil)
+                    return
+                }
+
+                do {
+                    if let jsonData = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        self?.handleNewRouteData(jsonData, for: location)
+                    }
+                } catch {
+                    print("❌ Failed to parse route API response: \(error.localizedDescription)")
+                    self?.onRouteUpdateCallback?(false, nil)
+                }
+            }
+        }
+
+        task.resume()
+    }
+
+    private func handleNewRouteData(_ data: [String: Any], for location: CLLocation) {
+        print("✅ Received new route data from API")
+
+        // Process the new route data
+        if let links = data["links"] as? [[Any]],
+           let alerts = data["alerts"] as? [[Any]],
+           let offset = data["offset"] as? [Any] {
+
+            let processedData = processRouteLinks(links: links, alerts: alerts, offset: offset)
+
+            // Store new route data
+            currentRouteData = processedData
+            currentAlerts = alerts
+            routeOffset = offset
+
+            // Find current link index
+            updateCurrentLinkIndex(for: location)
+
+            // Extract and cache speed limit alerts
+            extractSpeedLimitAlerts()
+
+            print("📊 Route data updated - Links: \(links.count), Alerts: \(alerts.count)")
+            onRouteUpdateCallback?(true, processedData)
+        }
+    }
+
+    private func updateCurrentLinkIndex(for location: CLLocation) {
+        guard let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]] else {
+            return
+        }
+
+        var nearestIndex: Int?
+        var minDistance = Double.infinity
+
+        for (index, link) in links.enumerated() {
+            if let startLat = link["startLat"] as? Double,
+               let startLon = link["startLon"] as? Double,
+               let endLat = link["endLat"] as? Double,
+               let endLon = link["endLon"] as? Double {
+
+                let distance = distanceToLineSegment(
+                    pointLat: location.coordinate.latitude,
+                    pointLon: location.coordinate.longitude,
+                    startLat: startLat, startLon: startLon,
+                    endLat: endLat, endLon: endLon
+                )
+
+                if distance < minDistance {
+                    minDistance = distance
+                    nearestIndex = index
+                }
+            }
+        }
+
+        if let index = nearestIndex {
+            currentLinkIndex = index
+            print("🎯 Current link index updated to: \(index)")
+        }
+    }
+
+    private func extractSpeedLimitAlerts() {
+        guard let alerts = currentAlerts else { return }
+
+        speedLimitAlerts.removeAll()
+
+        for (index, alert) in alerts.enumerated() {
+            if alert.count >= 4,
+               let type = alert[0] as? Int,
+               type == 0, // Speed limit alert type
+               let speedLimit = alert[2] as? Int,
+               speedLimit > 0 {
+
+                speedLimitAlerts["alert_\(index)"] = [
+                    "type": type,
+                    "speedLimit": speedLimit,
+                    "distance": alert[3]
+                ]
+            }
+        }
+
+        print("🚨 Extracted \(speedLimitAlerts.count) speed limit alerts")
+    }
+
+    private func checkSpeedLimitsForCurrentLocation(_ location: CLLocation) {
+        guard let currentIndex = currentLinkIndex,
+              let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]],
+              currentIndex < links.count else {
+            return
+        }
+
+        let currentLink = links[currentIndex]
+
+        // Get speed limits for current link
+        if let speedLimits = currentLink["speedLimits"] as? [[Int]] {
+            for speedLimitData in speedLimits {
+                if speedLimitData.count >= 2 {
+                    let speedLimit = speedLimitData[1] // Speed limit value
+
+                    // Convert current speed from m/s to km/h
+                    let currentSpeedKmh = location.speed * 3.6
+
+                    if currentSpeedKmh > Double(speedLimit) && speedLimit > 0 {
+                        // Speed violation detected
+                        let violation: [String: Any] = [
+                            "currentSpeed": currentSpeedKmh,
+                            "speedLimit": speedLimit,
+                            "excess": currentSpeedKmh - Double(speedLimit),
+                            "severity": currentSpeedKmh > Double(speedLimit) + 10 ? "critical" : "warning",
+                            "timestamp": Date().timeIntervalSince1970 * 1000,
+                            "location": [
+                                "latitude": location.coordinate.latitude,
+                                "longitude": location.coordinate.longitude
+                            ]
+                        ]
+
+                        print("🚨 SPEED VIOLATION: \(currentSpeedKmh) km/h > \(speedLimit) km/h")
+                        sendEvent(withName: "onSpeedAlert", body: violation)
+                    }
+                }
+            }
+        }
     }
 }

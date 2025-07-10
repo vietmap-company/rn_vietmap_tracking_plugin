@@ -46,6 +46,14 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var currentAlerts: ReadableArray? = null
   private var routeOffset: ReadableArray? = null
 
+  // Route Boundary Detection & API Management
+  private var currentLinkIndex: Int? = null
+  private var routeBoundaryThreshold: Double = 50.0 // meters
+  private var lastAPIRequestLocation: Location? = null
+  private var apiRequestInProgress: Boolean = false
+  private var speedLimitAlerts: MutableMap<String, Any> = mutableMapOf()
+  private var routeAPIEndpoint: String? = null
+
   companion object {
     const val NAME = "RnVietmapTrackingPlugin"
     const val LOCATION_PERMISSION_REQUEST_CODE = 1001
@@ -467,6 +475,18 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
     sendEvent("onLocationUpdate", locationData)
     println("📡 Location event sent to React Native (continuous updates)")
+
+    // MARK: - Route Boundary Detection & API Management
+    // Update current link index based on location
+    updateCurrentLinkIndex(location)
+
+    // Check if we need to request new route data from the server
+    if (shouldRequestNewRouteData(location)) {
+      requestRouteDataFromAPI(location)
+    }
+
+    // Check speed limits if we have route data
+    checkSpeedLimitsForCurrentLocation(location)
   }
 
   // Permission helper methods for enhanced tracking
@@ -590,6 +610,18 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
     sendEvent("onLocationUpdate", locationData)
     println("📡 Location event sent to React Native (forced mode)")
+
+    // MARK: - Route Boundary Detection & API Management
+    // Update current link index based on location
+    updateCurrentLinkIndex(location)
+
+    // Check if we need to request new route data from the server
+    if (shouldRequestNewRouteData(location)) {
+      requestRouteDataFromAPI(location)
+    }
+
+    // Check speed limits if we have route data
+    checkSpeedLimitsForCurrentLocation(location)
   }
 
   // MARK: - Speed Alert Methods
@@ -1165,5 +1197,289 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       .emit(eventName, data)
+  }
+
+  // MARK: - Route Boundary Detection Methods
+
+  @ReactMethod
+  fun setRouteAPIEndpoint(endpoint: String, promise: Promise) {
+    routeAPIEndpoint = endpoint
+    Log.d(NAME, "🗺️ Route API endpoint set: $endpoint")
+    promise.resolve(true)
+  }
+
+  @ReactMethod
+  fun enableRouteBoundaryDetection(threshold: Double, promise: Promise) {
+    routeBoundaryThreshold = threshold
+    Log.d(NAME, "🎯 Route boundary detection enabled with threshold: ${threshold}m")
+    promise.resolve(true)
+  }
+
+  private fun isLocationWithinCurrentRoute(location: Location): Boolean {
+    val routeData = currentRouteData ?: return false
+    val links = routeData.getArray("links") ?: return false
+    val currentIndex = currentLinkIndex ?: return false
+
+    if (currentIndex >= links.size()) return false
+
+    val currentLink = links.getMap(currentIndex) ?: return false
+
+    // Check distance to current link
+    val startLat = currentLink.getDouble("startLat")
+    val startLon = currentLink.getDouble("startLon")
+    val endLat = currentLink.getDouble("endLat")
+    val endLon = currentLink.getDouble("endLon")
+
+    val distance = distanceToLineSegment(
+      location.latitude, location.longitude,
+      startLat, startLon, endLat, endLon
+    )
+
+    return distance <= routeBoundaryThreshold
+  }
+
+  private fun shouldRequestNewRouteData(location: Location): Boolean {
+    // Don't request if API call is already in progress
+    if (apiRequestInProgress) {
+      return false
+    }
+
+    // Request if no route data exists
+    if (currentRouteData == null) {
+      return true
+    }
+
+    // Request if location is outside current route
+    if (!isLocationWithinCurrentRoute(location)) {
+      Log.d(NAME, "📍 Location outside current route - requesting new route data")
+      return true
+    }
+
+    // Request if significantly moved from last API request location
+    lastAPIRequestLocation?.let { lastLocation ->
+      val distance = location.distanceTo(lastLocation)
+      if (distance > 1000) { // 1km threshold
+        Log.d(NAME, "📍 Moved 1km from last API request - requesting updated route data")
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private fun requestRouteDataFromAPI(location: Location) {
+    val apiEndpoint = routeAPIEndpoint
+    if (apiEndpoint == null || apiRequestInProgress) {
+      Log.e(NAME, "❌ No API endpoint set or request in progress")
+      return
+    }
+
+    apiRequestInProgress = true
+    lastAPIRequestLocation = location
+
+    Log.d(NAME, "🌐 Requesting route data from API for location: ${location.latitude}, ${location.longitude}")
+
+    // Create API request using OkHttp or similar
+    Thread {
+      try {
+        val url = "$apiEndpoint?lat=${location.latitude}&lon=${location.longitude}"
+        val client = okhttp3.OkHttpClient()
+        val request = okhttp3.Request.Builder().url(url).build()
+
+        client.newCall(request).execute().use { response ->
+          if (response.isSuccessful) {
+            val jsonData = response.body?.string()
+            if (jsonData != null) {
+              // Parse and handle new route data
+              handleNewRouteDataFromAPI(jsonData, location)
+            }
+          } else {
+            Log.e(NAME, "❌ Route API request failed: ${response.code}")
+          }
+        }
+      } catch (e: Exception) {
+        Log.e(NAME, "❌ Route API request error: ${e.message}")
+      } finally {
+        apiRequestInProgress = false
+      }
+    }.start()
+  }
+
+  private fun handleNewRouteDataFromAPI(jsonData: String, location: Location) {
+    try {
+      val jsonObject = org.json.JSONObject(jsonData)
+
+      // Convert JSON to ReadableMap format
+      val routeMap = Arguments.createMap()
+
+      // Parse links
+      val linksArray = jsonObject.getJSONArray("links")
+      val linksReadable = Arguments.createArray()
+      for (i in 0 until linksArray.length()) {
+        val linkArray = linksArray.getJSONArray(i)
+        val linkReadable = Arguments.createArray()
+        for (j in 0 until linkArray.length()) {
+          when (val value = linkArray.get(j)) {
+            is Int -> linkReadable.pushInt(value)
+            is Double -> linkReadable.pushDouble(value)
+            is String -> linkReadable.pushString(value)
+            is org.json.JSONArray -> {
+              val subArray = Arguments.createArray()
+              for (k in 0 until value.length()) {
+                subArray.pushDouble(value.getDouble(k))
+              }
+              linkReadable.pushArray(subArray)
+            }
+          }
+        }
+        linksReadable.pushArray(linkReadable)
+      }
+
+      // Parse alerts
+      val alertsArray = jsonObject.getJSONArray("alerts")
+      val alertsReadable = Arguments.createArray()
+      for (i in 0 until alertsArray.length()) {
+        val alertArray = alertsArray.getJSONArray(i)
+        val alertReadable = Arguments.createArray()
+        for (j in 0 until alertArray.length()) {
+          val value = alertArray.get(j)
+          if (value == null || value == org.json.JSONObject.NULL) {
+            alertReadable.pushNull()
+          } else {
+            alertReadable.pushInt(value as Int)
+          }
+        }
+        alertsReadable.pushArray(alertReadable)
+      }
+
+      // Parse offset
+      val offsetArray = jsonObject.getJSONArray("offset")
+      val offsetReadable = Arguments.createArray()
+      for (i in 0 until offsetArray.length()) {
+        offsetReadable.pushInt(offsetArray.getInt(i))
+      }
+
+      routeMap.putArray("links", linksReadable)
+      routeMap.putArray("alerts", alertsReadable)
+      routeMap.putArray("offset", offsetReadable)
+
+      // Process the new route data
+      val processedData = processRouteLinks(linksReadable, alertsReadable, offsetReadable)
+
+      // Store new route data
+      currentRouteData = processedData
+      currentAlerts = alertsReadable
+      routeOffset = offsetReadable
+
+      // Update current link index
+      updateCurrentLinkIndex(location)
+
+      // Extract speed limit alerts
+      extractSpeedLimitAlerts()
+
+      Log.d(NAME, "✅ Route data updated from API - Links: ${linksReadable.size()}, Alerts: ${alertsReadable.size()}")
+
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Failed to parse route API response: ${e.message}")
+    }
+  }
+
+  private fun updateCurrentLinkIndex(location: Location) {
+    val routeData = currentRouteData ?: return
+    val links = routeData.getArray("links") ?: return
+
+    var nearestIndex: Int? = null
+    var minDistance = Double.MAX_VALUE
+
+    for (i in 0 until links.size()) {
+      val link = links.getMap(i) ?: continue
+
+      val startLat = link.getDouble("startLat")
+      val startLon = link.getDouble("startLon")
+      val endLat = link.getDouble("endLat")
+      val endLon = link.getDouble("endLon")
+
+      val distance = distanceToLineSegment(
+        location.latitude, location.longitude,
+        startLat, startLon, endLat, endLon
+      )
+
+      if (distance < minDistance) {
+        minDistance = distance
+        nearestIndex = i
+      }
+    }
+
+    nearestIndex?.let { index ->
+      currentLinkIndex = index
+      Log.d(NAME, "🎯 Current link index updated to: $index")
+    }
+  }
+
+  private fun extractSpeedLimitAlerts() {
+    val alerts = currentAlerts ?: return
+
+    speedLimitAlerts.clear()
+
+    for (i in 0 until alerts.size()) {
+      val alert = alerts.getArray(i) ?: continue
+      if (alert.size() >= 4) {
+        val type = alert.getInt(0)
+        if (type == 0) { // Speed limit alert type
+          val speedLimit = if (!alert.isNull(2)) alert.getInt(2) else 0
+          if (speedLimit > 0) {
+            speedLimitAlerts["alert_$i"] = mapOf(
+              "type" to type,
+              "speedLimit" to speedLimit,
+              "distance" to alert.getInt(3)
+            )
+          }
+        }
+      }
+    }
+
+    Log.d(NAME, "🚨 Extracted ${speedLimitAlerts.size} speed limit alerts")
+  }
+
+  private fun checkSpeedLimitsForCurrentLocation(location: Location) {
+    val currentIndex = currentLinkIndex ?: return
+    val routeData = currentRouteData ?: return
+    val links = routeData.getArray("links") ?: return
+
+    if (currentIndex >= links.size()) return
+
+    val currentLink = links.getMap(currentIndex) ?: return
+
+    // Get speed limits for current link
+    val speedLimits = currentLink.getArray("speedLimits")
+    speedLimits?.let { limits ->
+      for (i in 0 until limits.size()) {
+        val speedLimitData = limits.getArray(i) ?: continue
+        if (speedLimitData.size() >= 2) {
+          val speedLimit = speedLimitData.getInt(1) // Speed limit value
+
+          // Convert current speed from m/s to km/h
+          val currentSpeedKmh = location.speed * 3.6
+
+          if (currentSpeedKmh > speedLimit && speedLimit > 0) {
+            // Speed violation detected
+            val violation = Arguments.createMap().apply {
+              putDouble("currentSpeed", currentSpeedKmh)
+              putInt("speedLimit", speedLimit)
+              putDouble("excess", currentSpeedKmh - speedLimit)
+              putString("severity", if (currentSpeedKmh > speedLimit + 10) "critical" else "warning")
+              putDouble("timestamp", System.currentTimeMillis().toDouble())
+              putMap("location", Arguments.createMap().apply {
+                putDouble("latitude", location.latitude)
+                putDouble("longitude", location.longitude)
+              })
+            }
+
+            Log.d(NAME, "🚨 SPEED VIOLATION: $currentSpeedKmh km/h > $speedLimit km/h")
+            sendSpeedAlertEvent(violation)
+          }
+        }
+      }
+    }
   }
 }

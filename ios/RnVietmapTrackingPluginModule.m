@@ -69,6 +69,15 @@ RCT_EXTERN_METHOD(checkSpeedViolation:(double)currentSpeed
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// Route boundary detection and API management methods
+RCT_EXTERN_METHOD(setRouteAPIEndpoint:(NSString *)endpoint
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(enableRouteBoundaryDetection:(double)threshold
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 + (BOOL)requiresMainQueueSetup
 {
   return YES;
