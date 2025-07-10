@@ -29,6 +29,11 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     private var pendingAlertRejecter: RCTPromiseRejectBlock?
     private var isSpeedAlertActive: Bool = false
 
+    // MARK: - Route and Alert Data Structures
+    private var currentRouteData: [String: Any]?
+    private var currentAlerts: [[Any]]?
+    private var routeOffset: [Any]?
+
     override init() {
         super.init()
         locationManager = CLLocationManager()
@@ -78,7 +83,8 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             "onLocationUpdate",
             "onTrackingStatusChanged",
             "onLocationError",
-            "onPermissionChanged"
+            "onPermissionChanged",
+            "onSpeedAlert"
         ]
     }
 
@@ -932,5 +938,294 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         print("🛑 Turning off speed alert")
         stopSpeedAlertLocationMonitoring()
         resolver(true)
+    }
+
+    // MARK: - Route and Alert Processing Methods
+
+    @objc(processRouteData:resolver:rejecter:)
+    func processRouteData(routeJson: NSDictionary, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        print("🗺️ Processing route data natively")
+
+        guard let links = routeJson["links"] as? [[Any]],
+              let alerts = routeJson["alerts"] as? [[Any]],
+              let offset = routeJson["offset"] as? [Any] else {
+            print("❌ Invalid route data format")
+            rejecter("INVALID_DATA", "Invalid route data format", nil)
+            return
+        }
+
+        // Process and store route data
+        let processedData = processRouteLinks(links: links, alerts: alerts, offset: offset)
+
+        // Store for later use
+        currentRouteData = processedData
+        currentAlerts = alerts
+        routeOffset = offset
+
+        print("✅ Route data processed successfully")
+        print("📊 Processed \(links.count) links and \(alerts.count) alerts")
+
+        resolver(processedData)
+    }
+
+    private func processRouteLinks(links: [[Any]], alerts: [[Any]], offset: [Any]) -> [String: Any] {
+        var processedLinks: [[String: Any]] = []
+        var processedAlerts: [[String: Any]] = []
+
+        // Process links
+        for link in links {
+            if link.count >= 5,
+               let linkId = link[0] as? Int,
+               let direction = link[1] as? Int,
+               let coordinates = link[2] as? [Double],
+               let distance = link[3] as? Int,
+               let speedLimits = link[4] as? [[Int]] {
+
+                let processedLink: [String: Any] = [
+                    "id": linkId,
+                    "direction": direction,
+                    "startLat": coordinates.count > 0 ? coordinates[0] : 0.0,
+                    "startLon": coordinates.count > 1 ? coordinates[1] : 0.0,
+                    "endLat": coordinates.count > 2 ? coordinates[2] : 0.0,
+                    "endLon": coordinates.count > 3 ? coordinates[3] : 0.0,
+                    "distance": distance,
+                    "speedLimits": speedLimits
+                ]
+                processedLinks.append(processedLink)
+            }
+        }
+
+        // Process alerts
+        for alert in alerts {
+            if alert.count >= 4 {
+                let processedAlert: [String: Any] = [
+                    "type": alert[0],
+                    "subtype": alert[1],
+                    "speedLimit": alert[2] ?? NSNull(),
+                    "distance": alert[3]
+                ]
+                processedAlerts.append(processedAlert)
+            }
+        }
+
+        return [
+            "links": processedLinks,
+            "alerts": processedAlerts,
+            "offset": offset,
+            "totalLinks": processedLinks.count,
+            "totalAlerts": processedAlerts.count
+        ]
+    }
+
+    @objc(getCurrentRouteInfo:rejecter:)
+    func getCurrentRouteInfo(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        if let routeData = currentRouteData {
+            resolver(routeData)
+        } else {
+            rejecter("NO_ROUTE_DATA", "No route data available", nil)
+        }
+    }
+
+    @objc(findNearestAlert:longitude:resolver:rejecter:)
+    func findNearestAlert(latitude: Double, longitude: Double, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        guard let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]],
+              let alerts = currentAlerts else {
+            rejecter("NO_ROUTE_DATA", "No route data available", nil)
+            return
+        }
+
+        // Find nearest link based on current location
+        var nearestLinkIndex: Int?
+        var minDistance = Double.infinity
+
+        for (index, link) in links.enumerated() {
+            if let startLat = link["startLat"] as? Double,
+               let startLon = link["startLon"] as? Double,
+               let endLat = link["endLat"] as? Double,
+               let endLon = link["endLon"] as? Double {
+
+                // Calculate distance to link segment
+                let distance = distanceToLineSegment(
+                    pointLat: latitude, pointLon: longitude,
+                    startLat: startLat, startLon: startLon,
+                    endLat: endLat, endLon: endLon
+                )
+
+                if distance < minDistance {
+                    minDistance = distance
+                    nearestLinkIndex = index
+                }
+            }
+        }
+
+        // Find alerts for the nearest link
+        if let linkIndex = nearestLinkIndex {
+            let relevantAlerts = findAlertsForLink(linkIndex: linkIndex, alerts: alerts)
+
+            let result: [String: Any] = [
+                "nearestLinkIndex": linkIndex,
+                "distanceToLink": minDistance,
+                "alerts": relevantAlerts
+            ]
+
+            resolver(result)
+        } else {
+            rejecter("NO_LINK_FOUND", "No nearby link found", nil)
+        }
+    }
+
+    private func distanceToLineSegment(pointLat: Double, pointLon: Double,
+                                     startLat: Double, startLon: Double,
+                                     endLat: Double, endLon: Double) -> Double {
+        // Simplified distance calculation (should use proper geodesic calculation in production)
+        let A = pointLat - startLat
+        let B = pointLon - startLon
+        let C = endLat - startLat
+        let D = endLon - startLon
+
+        let dot = A * C + B * D
+        let lenSq = C * C + D * D
+
+        if lenSq == 0 {
+            return sqrt(A * A + B * B)
+        }
+
+        let param = dot / lenSq
+        let clampedParam = max(0, min(1, param))
+
+        let closestLat = startLat + clampedParam * C
+        let closestLon = startLon + clampedParam * D
+
+        let deltaLat = pointLat - closestLat
+        let deltaLon = pointLon - closestLon
+
+        return sqrt(deltaLat * deltaLat + deltaLon * deltaLon) * 111000 // Convert to meters approximately
+    }
+
+    private func findAlertsForLink(linkIndex: Int, alerts: [[Any]]) -> [[String: Any]] {
+        var relevantAlerts: [[String: Any]] = []
+
+        for alert in alerts {
+            if alert.count >= 4,
+               let distance = alert[3] as? Int {
+
+                // Simple logic: alerts within reasonable distance of current link
+                // In real implementation, you'd use proper route distance calculation
+                let alertInfo: [String: Any] = [
+                    "type": alert[0],
+                    "subtype": alert[1],
+                    "speedLimit": alert[2] ?? NSNull(),
+                    "distance": distance,
+                    "linkIndex": linkIndex
+                ]
+                relevantAlerts.append(alertInfo)
+            }
+        }
+
+        return relevantAlerts
+    }
+
+    @objc(checkSpeedViolation:resolver:rejecter:)
+    func checkSpeedViolation(currentSpeed: Double, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        guard let location = locationManager.location else {
+            rejecter("NO_LOCATION", "Current location not available", nil)
+            return
+        }
+
+        // Use internal helper method to find nearest alert
+        findNearestAlertInternal(latitude: location.coordinate.latitude,
+                               longitude: location.coordinate.longitude) { alertData in
+            if let alertData = alertData,
+               let alerts = alertData["alerts"] as? [[String: Any]] {
+
+                for alert in alerts {
+                    if let speedLimit = alert["speedLimit"] as? Int,
+                       speedLimit > 0 {
+
+                        let speedKmh = currentSpeed * 3.6 // Convert m/s to km/h
+                        let violation = speedKmh > Double(speedLimit)
+
+                        let speedResult: [String: Any] = [
+                            "isViolation": violation,
+                            "currentSpeed": speedKmh,
+                            "speedLimit": speedLimit,
+                            "excess": max(0, speedKmh - Double(speedLimit)),
+                            "alertInfo": alert
+                        ]
+
+                        // Send speed alert event if violation detected
+                        if violation {
+                            self.sendSpeedAlertEvent(speedResult)
+                        }
+
+                        resolver(speedResult)
+                        return
+                    }
+                }
+            }
+
+            // No speed limit found
+            let result: [String: Any] = [
+                "isViolation": false,
+                "currentSpeed": currentSpeed * 3.6,
+                "speedLimit": NSNull(),
+                "excess": 0
+            ]
+            resolver(result)
+        }
+    }
+
+    private func findNearestAlertInternal(latitude: Double, longitude: Double, completion: @escaping ([String: Any]?) -> Void) {
+        guard let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]],
+              let alerts = currentAlerts else {
+            completion(nil)
+            return
+        }
+
+        // Find nearest link based on current location
+        var nearestLinkIndex: Int?
+        var minDistance = Double.infinity
+
+        for (index, link) in links.enumerated() {
+            if let startLat = link["startLat"] as? Double,
+               let startLon = link["startLon"] as? Double,
+               let endLat = link["endLat"] as? Double,
+               let endLon = link["endLon"] as? Double {
+
+                // Calculate distance to link segment
+                let distance = distanceToLineSegment(
+                    pointLat: latitude, pointLon: longitude,
+                    startLat: startLat, startLon: startLon,
+                    endLat: endLat, endLon: endLon
+                )
+
+                if distance < minDistance {
+                    minDistance = distance
+                    nearestLinkIndex = index
+                }
+            }
+        }
+
+        // Find alerts for the nearest link
+        if let linkIndex = nearestLinkIndex {
+            let relevantAlerts = findAlertsForLink(linkIndex: linkIndex, alerts: alerts)
+
+            let result: [String: Any] = [
+                "nearestLinkIndex": linkIndex,
+                "distanceToLink": minDistance,
+                "alerts": relevantAlerts
+            ]
+
+            completion(result)
+        } else {
+            completion(nil)
+        }
+    }
+
+    private func sendSpeedAlertEvent(_ alertData: [String: Any]) {
+        print("🚨 Speed violation detected!")
+        sendEvent(withName: "onSpeedAlert", body: alertData)
     }
 }

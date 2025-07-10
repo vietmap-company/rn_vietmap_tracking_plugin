@@ -8,7 +8,7 @@ import type {
   LocationUpdateCallback,
   TrackingStatusCallback,
   SpeedAlertEvent,
-  SpeedAlertCallback
+  SpeedAlertCallback,
 } from './types';
 
 // Event emitter for location updates
@@ -190,6 +190,26 @@ export async function turnOffAlert(): Promise<boolean> {
   }
 }
 
+// MARK: - Route and Alert Processing Functions
+// Note: Route processing functions are now handled natively.
+// Use RnVietmapTrackingPlugin directly for route processing:
+// - RnVietmapTrackingPlugin.processRouteData(routeJson)
+// - RnVietmapTrackingPlugin.getCurrentRouteInfo()
+// - RnVietmapTrackingPlugin.findNearestAlert(latitude, longitude)
+// - RnVietmapTrackingPlugin.checkSpeedViolation(currentSpeed)
+
+/**
+ * Subscribe to speed alert events
+ * @param callback - Callback function to receive speed alert events
+ * @returns Subscription object with remove method
+ */
+export function addSpeedAlertListener(callback: SpeedAlertCallback) {
+  const subscription = eventEmitter.addListener('onSpeedAlert', callback);
+  return {
+    remove: () => subscription.remove(),
+  };
+}
+
 // Alias functions for backward compatibility
 export const startTracking = startLocationTracking;
 export const stopTracking = stopLocationTracking;
@@ -211,5 +231,11 @@ export type {
   LocationUpdateCallback,
   TrackingStatusCallback,
   SpeedAlertEvent,
-  SpeedAlertCallback
+  SpeedAlertCallback,
+  // Note: Route processing types below are for native-only use
+  // ProcessedRouteData,
+  // NearestAlertResult,
+  // SpeedViolationResult,
+  // RouteLink,
+  // RouteAlert
 };

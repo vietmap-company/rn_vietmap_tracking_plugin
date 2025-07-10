@@ -52,6 +52,23 @@ RCT_EXTERN_METHOD(turnOnAlert:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(turnOffAlert:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// Route and Alert Processing methods
+RCT_EXTERN_METHOD(processRouteData:(NSDictionary *)routeJson
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(getCurrentRouteInfo:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(findNearestAlert:(double)latitude
+                  longitude:(double)longitude
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(checkSpeedViolation:(double)currentSpeed
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 + (BOOL)requiresMainQueueSetup
 {
   return YES;
@@ -59,7 +76,7 @@ RCT_EXTERN_METHOD(turnOffAlert:(RCTPromiseResolveBlock)resolve
 
 - (NSArray<NSString *> *)supportedEvents
 {
-  return @[@"onLocationUpdate", @"onTrackingStatusChanged", @"onLocationError", @"onPermissionChanged"];
+  return @[@"onLocationUpdate", @"onTrackingStatusChanged", @"onLocationError", @"onPermissionChanged", @"onSpeedAlert"];
 }
 
 @end

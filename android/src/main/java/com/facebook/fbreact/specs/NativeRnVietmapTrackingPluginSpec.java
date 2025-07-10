@@ -81,4 +81,20 @@ public abstract class NativeRnVietmapTrackingPluginSpec extends ReactContextBase
   @ReactMethod
   @DoNotStrip
   public abstract void turnOffAlert(Promise promise);
+
+  @ReactMethod
+  @DoNotStrip
+  public abstract void processRouteData(ReadableMap routeJson, Promise promise);
+
+  @ReactMethod
+  @DoNotStrip
+  public abstract void getCurrentRouteInfo(Promise promise);
+
+  @ReactMethod
+  @DoNotStrip
+  public abstract void findNearestAlert(double latitude, double longitude, Promise promise);
+
+  @ReactMethod
+  @DoNotStrip
+  public abstract void checkSpeedViolation(double currentSpeed, Promise promise);
 }

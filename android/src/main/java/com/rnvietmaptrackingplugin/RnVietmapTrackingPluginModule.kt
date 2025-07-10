@@ -41,6 +41,11 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var pendingAlertPromise: Promise? = null
   private var isSpeedAlertActive = false
 
+  // Route and Alert Data
+  private var currentRouteData: ReadableMap? = null
+  private var currentAlerts: ReadableArray? = null
+  private var routeOffset: ReadableArray? = null
+
   companion object {
     const val NAME = "RnVietmapTrackingPlugin"
     const val LOCATION_PERMISSION_REQUEST_CODE = 1001
@@ -814,5 +819,351 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     Log.d(NAME, "🛑 Turning off speed alert")
     stopSpeedAlertLocationMonitoring()
     promise.resolve(true)
+  }
+
+  // MARK: - Route and Alert Processing Methods
+
+  @ReactMethod
+  fun processRouteData(routeJson: ReadableMap, promise: Promise) {
+    Log.d(NAME, "🗺️ Processing route data natively")
+
+    try {
+      val links = routeJson.getArray("links")
+      val alerts = routeJson.getArray("alerts")
+      val offset = routeJson.getArray("offset")
+
+      if (links == null || alerts == null || offset == null) {
+        Log.e(NAME, "❌ Invalid route data format")
+        promise.reject("INVALID_DATA", "Invalid route data format")
+        return
+      }
+
+      // Process and store route data
+      val processedData = processRouteLinks(links, alerts, offset)
+
+      // Store for later use
+      currentRouteData = processedData
+      currentAlerts = alerts
+      routeOffset = offset
+
+      Log.d(NAME, "✅ Route data processed successfully")
+      Log.d(NAME, "📊 Processed ${links.size()} links and ${alerts.size()} alerts")
+
+      promise.resolve(processedData)
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Error processing route data: ${e.message}")
+      promise.reject("PROCESSING_ERROR", "Error processing route data: ${e.message}")
+    }
+  }
+
+  private fun processRouteLinks(links: ReadableArray, alerts: ReadableArray, offset: ReadableArray): WritableMap {
+    val processedLinks = Arguments.createArray()
+    val processedAlerts = Arguments.createArray()
+
+    // Process links
+    for (i in 0 until links.size()) {
+      val link = links.getArray(i)
+      if (link != null && link.size() >= 5) {
+        val linkId = link.getInt(0)
+        val direction = link.getInt(1)
+        val coordinates = link.getArray(2)
+        val distance = link.getInt(3)
+        val speedLimits = link.getArray(4)
+
+        val processedLink = Arguments.createMap().apply {
+          putInt("id", linkId)
+          putInt("direction", direction)
+          if (coordinates != null && coordinates.size() >= 4) {
+            putDouble("startLat", coordinates.getDouble(0))
+            putDouble("startLon", coordinates.getDouble(1))
+            putDouble("endLat", coordinates.getDouble(2))
+            putDouble("endLon", coordinates.getDouble(3))
+          }
+          putInt("distance", distance)
+          putArray("speedLimits", speedLimits)
+        }
+        processedLinks.pushMap(processedLink)
+      }
+    }
+
+    // Process alerts
+    for (i in 0 until alerts.size()) {
+      val alert = alerts.getArray(i)
+      if (alert != null && alert.size() >= 4) {
+        val processedAlert = Arguments.createMap().apply {
+          putInt("type", alert.getInt(0))
+          if (!alert.isNull(1)) putInt("subtype", alert.getInt(1))
+          if (!alert.isNull(2)) putInt("speedLimit", alert.getInt(2))
+          putInt("distance", alert.getInt(3))
+        }
+        processedAlerts.pushMap(processedAlert)
+      }
+    }
+
+    return Arguments.createMap().apply {
+      putArray("links", processedLinks)
+      putArray("alerts", processedAlerts)
+      putArray("offset", offset)
+      putInt("totalLinks", processedLinks.size())
+      putInt("totalAlerts", processedAlerts.size())
+    }
+  }
+
+  @ReactMethod
+  fun getCurrentRouteInfo(promise: Promise) {
+    if (currentRouteData != null) {
+      promise.resolve(currentRouteData)
+    } else {
+      promise.reject("NO_ROUTE_DATA", "No route data available")
+    }
+  }
+
+  @ReactMethod
+  fun findNearestAlert(latitude: Double, longitude: Double, promise: Promise) {
+    if (currentRouteData == null || currentAlerts == null) {
+      promise.reject("NO_ROUTE_DATA", "No route data available")
+      return
+    }
+
+    try {
+      val links = currentRouteData!!.getArray("links")
+      if (links == null) {
+        promise.reject("NO_LINKS", "No links data available")
+        return
+      }
+
+      // Find nearest link based on current location
+      var nearestLinkIndex: Int? = null
+      var minDistance = Double.MAX_VALUE
+
+      for (i in 0 until links.size()) {
+        val link = links.getMap(i)
+        if (link != null) {
+          val startLat = link.getDouble("startLat")
+          val startLon = link.getDouble("startLon")
+          val endLat = link.getDouble("endLat")
+          val endLon = link.getDouble("endLon")
+
+          // Calculate distance to link segment
+          val distance = distanceToLineSegment(
+            latitude, longitude,
+            startLat, startLon,
+            endLat, endLon
+          )
+
+          if (distance < minDistance) {
+            minDistance = distance
+            nearestLinkIndex = i
+          }
+        }
+      }
+
+      // Find alerts for the nearest link
+      if (nearestLinkIndex != null) {
+        val relevantAlerts = findAlertsForLink(nearestLinkIndex, currentAlerts!!)
+
+        val result = Arguments.createMap().apply {
+          putInt("nearestLinkIndex", nearestLinkIndex)
+          putDouble("distanceToLink", minDistance)
+          putArray("alerts", relevantAlerts)
+        }
+
+        promise.resolve(result)
+      } else {
+        promise.reject("NO_LINK_FOUND", "No nearby link found")
+      }
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Error finding nearest alert: ${e.message}")
+      promise.reject("SEARCH_ERROR", "Error finding nearest alert: ${e.message}")
+    }
+  }
+
+  private fun distanceToLineSegment(
+    pointLat: Double, pointLon: Double,
+    startLat: Double, startLon: Double,
+    endLat: Double, endLon: Double
+  ): Double {
+    // Simplified distance calculation (should use proper geodesic calculation in production)
+    val A = pointLat - startLat
+    val B = pointLon - startLon
+    val C = endLat - startLat
+    val D = endLon - startLon
+
+    val dot = A * C + B * D
+    val lenSq = C * C + D * D
+
+    if (lenSq == 0.0) {
+      return kotlin.math.sqrt(A * A + B * B)
+    }
+
+    val param = dot / lenSq
+    val clampedParam = kotlin.math.max(0.0, kotlin.math.min(1.0, param))
+
+    val closestLat = startLat + clampedParam * C
+    val closestLon = startLon + clampedParam * D
+
+    val deltaLat = pointLat - closestLat
+    val deltaLon = pointLon - closestLon
+
+    return kotlin.math.sqrt(deltaLat * deltaLat + deltaLon * deltaLon) * 111000 // Convert to meters approximately
+  }
+
+  private fun findAlertsForLink(linkIndex: Int, alerts: ReadableArray): WritableArray {
+    val relevantAlerts = Arguments.createArray()
+
+    for (i in 0 until alerts.size()) {
+      val alert = alerts.getArray(i)
+      if (alert != null && alert.size() >= 4) {
+        val distance = alert.getInt(3)
+
+        // Simple logic: alerts within reasonable distance of current link
+        // In real implementation, you'd use proper route distance calculation
+        val alertInfo = Arguments.createMap().apply {
+          putInt("type", alert.getInt(0))
+          if (!alert.isNull(1)) putInt("subtype", alert.getInt(1))
+          if (!alert.isNull(2)) putInt("speedLimit", alert.getInt(2))
+          putInt("distance", distance)
+          putInt("linkIndex", linkIndex)
+        }
+        relevantAlerts.pushMap(alertInfo)
+      }
+    }
+
+    return relevantAlerts
+  }
+
+  @ReactMethod
+  fun checkSpeedViolation(currentSpeed: Double, promise: Promise) {
+    try {
+      fusedLocationClient?.lastLocation?.addOnCompleteListener { task ->
+        if (!task.isSuccessful || task.result == null) {
+          promise.reject("NO_LOCATION", "Current location not available")
+          return@addOnCompleteListener
+        }
+
+        val location = task.result
+
+        // Find current position on route and check speed limits
+        findNearestAlertInternal(location.latitude, location.longitude) { result ->
+          try {
+            if (result != null) {
+              val alerts = result.getArray("alerts")
+              if (alerts != null) {
+                for (i in 0 until alerts.size()) {
+                  val alert = alerts.getMap(i)
+                  if (alert != null && alert.hasKey("speedLimit") && !alert.isNull("speedLimit")) {
+                    val speedLimit = alert.getInt("speedLimit")
+                    if (speedLimit > 0) {
+                      val speedKmh = currentSpeed * 3.6 // Convert m/s to km/h
+                      val violation = speedKmh > speedLimit
+
+                      val speedResult = Arguments.createMap().apply {
+                        putBoolean("isViolation", violation)
+                        putDouble("currentSpeed", speedKmh)
+                        putInt("speedLimit", speedLimit)
+                        putDouble("excess", kotlin.math.max(0.0, speedKmh - speedLimit))
+                        putMap("alertInfo", alert)
+                      }
+
+                      // Send speed alert event if violation detected
+                      if (violation) {
+                        sendSpeedAlertEvent(speedResult)
+                      }
+
+                      promise.resolve(speedResult)
+                      return@findNearestAlertInternal
+                    }
+                  }
+                }
+              }
+            }
+
+            // No speed limit found
+            val result = Arguments.createMap().apply {
+              putBoolean("isViolation", false)
+              putDouble("currentSpeed", currentSpeed * 3.6)
+              putNull("speedLimit")
+              putDouble("excess", 0.0)
+            }
+            promise.resolve(result)
+          } catch (e: Exception) {
+            promise.reject("SPEED_CHECK_ERROR", "Error checking speed violation: ${e.message}")
+          }
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Error in checkSpeedViolation: ${e.message}")
+      promise.reject("SPEED_CHECK_ERROR", "Error checking speed violation: ${e.message}")
+    }
+  }
+
+  private fun findNearestAlertInternal(latitude: Double, longitude: Double, callback: (WritableMap?) -> Unit) {
+    if (currentRouteData == null || currentAlerts == null) {
+      callback(null)
+      return
+    }
+
+    try {
+      val links = currentRouteData!!.getArray("links")
+      if (links == null) {
+        callback(null)
+        return
+      }
+
+      // Find nearest link based on current location
+      var nearestLinkIndex: Int? = null
+      var minDistance = Double.MAX_VALUE
+
+      for (i in 0 until links.size()) {
+        val link = links.getMap(i)
+        if (link != null) {
+          val startLat = link.getDouble("startLat")
+          val startLon = link.getDouble("startLon")
+          val endLat = link.getDouble("endLat")
+          val endLon = link.getDouble("endLon")
+
+          // Calculate distance to link segment
+          val distance = distanceToLineSegment(
+            latitude, longitude,
+            startLat, startLon,
+            endLat, endLon
+          )
+
+          if (distance < minDistance) {
+            minDistance = distance
+            nearestLinkIndex = i
+          }
+        }
+      }
+
+      // Find alerts for the nearest link
+      if (nearestLinkIndex != null) {
+        val relevantAlerts = findAlertsForLink(nearestLinkIndex, currentAlerts!!)
+
+        val result = Arguments.createMap().apply {
+          putInt("nearestLinkIndex", nearestLinkIndex)
+          putDouble("distanceToLink", minDistance)
+          putArray("alerts", relevantAlerts)
+        }
+
+        callback(result)
+      } else {
+        callback(null)
+      }
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Error finding nearest alert: ${e.message}")
+      callback(null)
+    }
+  }
+
+  private fun sendSpeedAlertEvent(alertData: WritableMap) {
+    Log.d(NAME, "🚨 Speed violation detected!")
+    sendEvent("onSpeedAlert", alertData)
+  }
+
+  private fun sendEvent(eventName: String, data: Any?) {
+    reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit(eventName, data)
   }
 }
