@@ -20,8 +20,9 @@ export interface Spec extends TurboModule {
   hasLocationPermissions(): Promise<boolean>;
   requestAlwaysLocationPermissions(): Promise<string>;
 
-  // Speed alert method
-  listenerAlert(): Promise<void>;
+  // Speed alert methods
+  turnOnAlert(): Promise<boolean>;
+  turnOffAlert(): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('RnVietmapTrackingPlugin');

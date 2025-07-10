@@ -21,7 +21,8 @@ import {
   requestLocationPermissions,
   hasLocationPermissions,
   updateTrackingConfig,
-  listenerAlert,
+  turnOnAlert,
+  turnOffAlert,
   TrackingPresets,
   LocationUtils,
   TrackingSession,
@@ -54,7 +55,6 @@ const GPSTrackingDemo = () => {
   const trackingSession = useRef(new TrackingSession());
   const locationSubscription = useRef<any>(null);
   const statusSubscription = useRef<any>(null);
-  const speedAlertSubscription = useRef<any>(null);
 
   useEffect(() => {
     initializeTracking();
@@ -100,9 +100,6 @@ const GPSTrackingDemo = () => {
     }
     if (statusSubscription.current) {
       statusSubscription.current.remove();
-    }
-    if (speedAlertSubscription.current) {
-      speedAlertSubscription.current.remove();
     }
   };
 
@@ -156,13 +153,8 @@ const GPSTrackingDemo = () => {
       const activeConfig = getActiveConfig();
       console.log('🚀 Starting enhanced tracking with config:', activeConfig);
 
-      // Use enhanced tracking with background mode, interval, forceUpdateBackground, and distanceFilter
-      const result = await startTracking(
-        activeConfig.backgroundMode,
-        activeConfig.intervalMs,
-        useCustomConfig ? customForceUpdateBackground : forceUpdateBackground,
-        activeConfig.distanceFilter
-      );
+      // Use enhanced tracking with location config
+      const result = await startTracking(activeConfig);
       console.log('✅ Enhanced tracking result:', result);
 
       trackingSession.current.start();
@@ -226,28 +218,24 @@ const GPSTrackingDemo = () => {
   const handleSpeedAlertToggle = async (enabled: boolean) => {
     try {
       if (enabled) {
-        // Start speed alert listener
-        const subscription = await listenerAlert((alert: SpeedAlertEvent) => {
-          console.log('🚨 Speed Alert:', alert);
-          setLastSpeedAlert(alert);
-          Alert.alert(
-            '🚨 Speed Alert',
-            `Current: ${alert.currentSpeed} km/h\nLimit: ${alert.speedLimit} km/h\nSeverity: ${alert.severity}`,
-            [{ text: 'OK' }]
-          );
-        });
-        speedAlertSubscription.current = subscription;
-        setIsSpeedAlertEnabled(true);
-        Alert.alert('✅ Speed Alert', 'Speed alert listener started');
-      } else {
-        // Stop speed alert listener
-        if (speedAlertSubscription.current) {
-          speedAlertSubscription.current.remove();
-          speedAlertSubscription.current = null;
+        // Turn on speed alert
+        const success = await turnOnAlert();
+        if (success) {
+          setIsSpeedAlertEnabled(true);
+          Alert.alert('✅ Speed Alert', 'Speed alert turned on successfully');
+        } else {
+          Alert.alert('❌ Error', 'Failed to turn on speed alert');
         }
-        setIsSpeedAlertEnabled(false);
-        setLastSpeedAlert(null);
-        Alert.alert('🛑 Speed Alert', 'Speed alert listener stopped');
+      } else {
+        // Turn off speed alert
+        const success = await turnOffAlert();
+        if (success) {
+          setIsSpeedAlertEnabled(false);
+          setLastSpeedAlert(null);
+          Alert.alert('🛑 Speed Alert', 'Speed alert turned off successfully');
+        } else {
+          Alert.alert('❌ Error', 'Failed to turn off speed alert');
+        }
       }
     } catch (error) {
       console.error('Error toggling speed alert:', error);

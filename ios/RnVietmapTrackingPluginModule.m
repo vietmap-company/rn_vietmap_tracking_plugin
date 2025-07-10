@@ -45,8 +45,11 @@ RCT_EXTERN_METHOD(hasLocationPermissions:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(requestAlwaysLocationPermissions:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-// Speed alert method
-RCT_EXTERN_METHOD(listenerAlert:(RCTPromiseResolveBlock)resolve
+// Speed alert methods
+RCT_EXTERN_METHOD(turnOnAlert:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(turnOffAlert:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 + (BOOL)requiresMainQueueSetup

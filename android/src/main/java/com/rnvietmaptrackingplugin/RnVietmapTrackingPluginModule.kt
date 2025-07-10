@@ -10,16 +10,15 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.*
-import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.OnCompleteListener
+import com.facebook.fbreact.specs.NativeRnVietmapTrackingPluginSpec
 import java.util.Timer
 import java.util.TimerTask
 
-@ReactModule(name = RnVietmapTrackingPluginModule.NAME)
 class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   NativeRnVietmapTrackingPluginSpec(reactContext) {
 
@@ -39,6 +38,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
   // Permission request handling
   private var permissionPromise: Promise? = null
+  private var pendingAlertPromise: Promise? = null
+  private var isSpeedAlertActive = false
 
   companion object {
     const val NAME = "RnVietmapTrackingPlugin"
@@ -210,15 +211,54 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   override fun requestAlwaysLocationPermissions(promise: Promise) {
-    // On Android, there's no separate "Always" permission like iOS
-    // Background location access is controlled by targetSdkVersion and manifest permissions
-    // For API consistency, we'll just return the same as regular permission request
-    Log.d("VietmapTracking", "🔐 Android: Always permission request - delegating to regular permission check")
+    // On Android, "Always" permission is handled by ACCESS_BACKGROUND_LOCATION for Android 10+
+    println("🔐 Requesting always location permissions...")
 
-    if (hasLocationPermissions()) {
-      promise.resolve("granted")
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+      // For Android 10+, need background location permission
+      if (hasBackgroundLocationPermission()) {
+        println("✅ Always permissions already granted")
+        promise.resolve("granted")
+        return
+      }
+
+      val activity = reactApplicationContext.currentActivity
+      if (activity == null) {
+        println("❌ No current activity available")
+        promise.reject("NO_ACTIVITY", "No current activity available for permission request")
+        return
+      }
+
+      if (activity is PermissionAwareActivity) {
+        val permissionAwareActivity = activity as PermissionAwareActivity
+        val permissions = arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+
+        val permissionListener = object : PermissionListener {
+          override fun onRequestPermissionsResult(
+            requestCode: Int,
+            permissions: Array<String>,
+            grantResults: IntArray
+          ): Boolean {
+            if (requestCode == LOCATION_PERMISSION_REQUEST_CODE + 2) { // Different code for always permission
+              val granted = grantResults.isNotEmpty() &&
+                           grantResults[0] == PackageManager.PERMISSION_GRANTED
+              promise.resolve(if (granted) "granted" else "denied")
+              return true
+            }
+            return false
+          }
+        }
+
+        permissionAwareActivity.requestPermissions(
+          permissions,
+          LOCATION_PERMISSION_REQUEST_CODE + 2,
+          permissionListener
+        )
+      } else {
+        promise.reject("PERMISSION_ERROR", "Activity is not PermissionAware")
+      }
     } else {
-      // Delegate to regular permission request
+      // For Android 9 and below, regular location permission is sufficient
       requestLocationPermissions(promise)
     }
   }
@@ -264,9 +304,12 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   // Enhanced tracking methods for background_location_2 strategy
-  @ReactMethod
-  fun startTracking(backgroundMode: Boolean, intervalMs: Int, forceUpdateBackground: Boolean = false, distanceFilter: Double = 10.0, promise: Promise) {
-    println("🚀 Starting enhanced tracking - Background mode: $backgroundMode, Interval: ${intervalMs}ms, Force update: $forceUpdateBackground, Distance filter: ${distanceFilter}m")
+  override fun startTracking(backgroundMode: Boolean, intervalMs: Double, forceUpdateBackground: Boolean?, distanceFilter: Double?, promise: Promise) {
+    val actualForceUpdate = forceUpdateBackground ?: false
+    val actualDistanceFilter = distanceFilter ?: 10.0
+    val actualIntervalMs = intervalMs.toLong()
+
+    println("🚀 Starting enhanced tracking - Background mode: $backgroundMode, Interval: ${actualIntervalMs}ms, Force update: $actualForceUpdate, Distance filter: ${actualDistanceFilter}m")
 
     if (isTracking) {
       println("⚠️ Already tracking")
@@ -275,9 +318,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
 
     this.backgroundMode = backgroundMode
-    this.intervalMs = intervalMs.toLong()
-    this.forceUpdateBackground = forceUpdateBackground
-    this.distanceFilter = distanceFilter
+    this.intervalMs = actualIntervalMs
+    this.forceUpdateBackground = actualForceUpdate
+    this.distanceFilter = actualDistanceFilter
 
     // Check permissions
     if (!hasLocationPermission()) {
@@ -322,8 +365,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  @ReactMethod
-  fun stopTracking(promise: Promise) {
+  override fun stopTracking(promise: Promise) {
     println("🛑 Stopping enhanced tracking")
 
     if (!isTracking) {
@@ -547,18 +589,230 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
   // MARK: - Speed Alert Methods
 
+  override fun multiply(a: Double, b: Double): Double {
+    return a * b
+  }
+
   @ReactMethod
-  override fun listenerAlert(promise: Promise) {
-    Log.d(NAME, "🚨 Speed alert listener initialized")
-    
-    // TODO: Implement speed alert logic here
-    // For now, just resolve the promise to indicate the listener is active
-    // In a real implementation, you would:
-    // 1. Set up speed monitoring
-    // 2. Configure speed limit detection  
-    // 3. Monitor current speed vs speed limits
-    // 4. Send speed alert events via sendEvent("onSpeedAlert", alertData)
-    
-    promise.resolve(null)
+  override fun turnOnAlert(promise: Promise) {
+    Log.d(NAME, "🚨 Turning on speed alert")
+
+    // Check if location permissions are granted
+    if (hasLocationPermissions()) {
+      // Check if we need background location permission for Android 10+
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !hasBackgroundLocationPermission()) {
+        Log.d(NAME, "📱 Need background location permission for Android 10+, requesting...")
+        requestBackgroundLocationPermissionForAlert(promise)
+        return
+      }
+
+      Log.d(NAME, "✅ Location permissions already granted, starting location monitoring for speed alert")
+      startSpeedAlertLocationMonitoring()
+      promise.resolve(true)
+      return
+    }
+
+    Log.d(NAME, "📱 Location permissions not granted, requesting permissions...")
+
+    // Store the promise to resolve after permission is granted/denied
+    pendingAlertPromise = promise
+
+    val activity = reactApplicationContext.currentActivity
+    if (activity == null) {
+      Log.e(NAME, "❌ No current activity available for permission request")
+      promise.resolve(false)
+      pendingAlertPromise = null
+      return
+    }
+
+    if (activity is PermissionAwareActivity) {
+      val permissionAwareActivity = activity as PermissionAwareActivity
+
+      val permissions = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+      )
+
+      val permissionListener = object : PermissionListener {
+        override fun onRequestPermissionsResult(
+          requestCode: Int,
+          permissions: Array<String>,
+          grantResults: IntArray
+        ): Boolean {
+          if (requestCode == LOCATION_PERMISSION_REQUEST_CODE + 1) { // Use different code for alert
+            val granted = grantResults.isNotEmpty() &&
+                         grantResults[0] == PackageManager.PERMISSION_GRANTED
+
+            pendingAlertPromise?.let { alertPromise ->
+              if (granted) {
+                Log.d(NAME, "✅ Location permissions granted for speed alert")
+                // Check if we need background location permission for Android 10+
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !hasBackgroundLocationPermission()) {
+                  Log.d(NAME, "📱 Now requesting background location permission for Android 10+...")
+                  requestBackgroundLocationPermissionForAlert(alertPromise)
+                } else {
+                  startSpeedAlertLocationMonitoring()
+                  alertPromise.resolve(true)
+                }
+              } else {
+                Log.d(NAME, "❌ Location permissions denied for speed alert")
+                alertPromise.resolve(false)
+              }
+            }
+            pendingAlertPromise = null
+            return true
+          }
+          return false
+        }
+      }
+
+      permissionAwareActivity.requestPermissions(
+        permissions,
+        LOCATION_PERMISSION_REQUEST_CODE + 1, // Use different code for alert
+        permissionListener
+      )
+    } else {
+      Log.e(NAME, "❌ Activity is not PermissionAware")
+      promise.resolve(false)
+      pendingAlertPromise = null
+    }
+  }
+
+  private fun requestBackgroundLocationPermissionForAlert(promise: Promise) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+      // Background location permission not needed before Android 10
+      startSpeedAlertLocationMonitoring()
+      promise.resolve(true)
+      return
+    }
+
+    val activity = reactApplicationContext.currentActivity
+    if (activity == null) {
+      Log.e(NAME, "❌ No current activity available for background permission request")
+      promise.resolve(false)
+      return
+    }
+
+    if (activity is PermissionAwareActivity) {
+      val permissionAwareActivity = activity as PermissionAwareActivity
+
+      val backgroundPermissionListener = object : PermissionListener {
+        override fun onRequestPermissionsResult(
+          requestCode: Int,
+          permissions: Array<String>,
+          grantResults: IntArray
+        ): Boolean {
+          if (requestCode == LOCATION_PERMISSION_REQUEST_CODE + 2) { // Different code for background
+            val granted = grantResults.isNotEmpty() &&
+                         grantResults[0] == PackageManager.PERMISSION_GRANTED
+
+            if (granted) {
+              Log.d(NAME, "✅ Background location permission granted for speed alert")
+            } else {
+              Log.d(NAME, "⚠️ Background location permission denied - will work in foreground only")
+            }
+
+            startSpeedAlertLocationMonitoring()
+            promise.resolve(true)
+            return true
+          }
+          return false
+        }
+      }
+
+      permissionAwareActivity.requestPermissions(
+        arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+        LOCATION_PERMISSION_REQUEST_CODE + 2, // Different code for background
+        backgroundPermissionListener
+      )
+    } else {
+      Log.e(NAME, "❌ Activity is not PermissionAware for background permission")
+      startSpeedAlertLocationMonitoring()
+      promise.resolve(true)
+    }
+  }
+
+  private fun startSpeedAlertLocationMonitoring() {
+    Log.d(NAME, "🎯 Starting continuous location monitoring for speed alert")
+
+    isSpeedAlertActive = true
+
+    try {
+      // Configure for high sensitivity to get frequent updates
+      val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000) // 1 second interval
+        .setMinUpdateDistanceMeters(5.0f) // 5 meter distance filter for high sensitivity as requested
+        .setWaitForAccurateLocation(false)
+        .build()
+
+      Log.d(NAME, "🔄 Starting location updates for speed alert")
+      Log.d(NAME, "📏 Distance filter: 5.0m (high sensitivity - updated from 1m)")
+      Log.d(NAME, "📍 Accuracy: High accuracy")
+      Log.d(NAME, "⏰ Update interval: 1000ms")
+
+      if (ActivityCompat.checkSelfPermission(
+          reactApplicationContext,
+          Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+      ) {
+        fusedLocationClient.requestLocationUpdates(
+          locationRequest,
+          speedAlertLocationCallback,
+          Looper.getMainLooper()
+        )
+        Log.d(NAME, "✅ Speed alert location monitoring started")
+      } else {
+        Log.e(NAME, "❌ Location permission not available for speed alert")
+      }
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Error starting speed alert location monitoring: ${e.message}")
+    }
+  }
+
+  private fun stopSpeedAlertLocationMonitoring() {
+    Log.d(NAME, "🛑 Stopping speed alert location monitoring")
+
+    isSpeedAlertActive = false
+
+    try {
+      // Only stop if we're not doing regular tracking
+      if (!isTracking) {
+        fusedLocationClient.removeLocationUpdates(speedAlertLocationCallback)
+        Log.d(NAME, "✅ Speed alert location monitoring stopped")
+      } else {
+        Log.d(NAME, "ℹ️ Regular tracking is active, keeping location monitoring")
+      }
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Error stopping speed alert location monitoring: ${e.message}")
+    }
+  }
+
+  private val speedAlertLocationCallback = object : LocationCallback() {
+    override fun onLocationResult(locationResult: LocationResult) {
+      if (!isSpeedAlertActive) return
+
+      locationResult.lastLocation?.let { location ->
+        // Print detailed location info for speed alert
+        Log.d(NAME, "🚨 [SPEED ALERT] Location Update:")
+        Log.d(NAME, "  📍 Coordinates: ${location.latitude}, ${location.longitude}")
+        Log.d(NAME, "  🚗 Speed: ${location.speed} m/s (${String.format("%.1f", location.speed * 3.6)} km/h)")
+        Log.d(NAME, "  📏 Accuracy: ${location.accuracy}m")
+        Log.d(NAME, "  🧭 Bearing: ${location.bearing}°")
+        Log.d(NAME, "  ⏰ Time: ${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(location.time))}")
+        Log.d(NAME, "  🌍 Altitude: ${location.altitude}m")
+      }
+    }
+
+    override fun onLocationAvailability(locationAvailability: LocationAvailability) {
+      if (isSpeedAlertActive) {
+        Log.d(NAME, "🚨 [SPEED ALERT] Location availability: ${locationAvailability.isLocationAvailable}")
+      }
+    }
+  }
+
+  @ReactMethod
+  override fun turnOffAlert(promise: Promise) {
+    Log.d(NAME, "🛑 Turning off speed alert")
+    stopSpeedAlertLocationMonitoring()
+    promise.resolve(true)
   }
 }

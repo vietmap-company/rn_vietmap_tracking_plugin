@@ -24,6 +24,11 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     private var backgroundLocationTaskId = "com.rnvietmaptrackingplugin.background-location"
     private var locationSyncTaskId = "com.rnvietmaptrackingplugin.location-sync"
 
+    // Store pending resolvers for permission callback
+    private var pendingAlertResolver: RCTPromiseResolveBlock?
+    private var pendingAlertRejecter: RCTPromiseRejectBlock?
+    private var isSpeedAlertActive: Bool = false
+
     override init() {
         super.init()
         locationManager = CLLocationManager()
@@ -196,6 +201,12 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             print("🌙 Starting background location tracking with continuous updates")
             startBackgroundLocationTracking()
         }
+
+        // ✅ Also handle speed alert background tracking
+        if isSpeedAlertActive {
+            print("🚨 Starting background location tracking for speed alert")
+            startBackgroundLocationTracking()
+        }
     }
 
     @objc private func appWillEnterForeground() {
@@ -207,6 +218,11 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
         if isTracking {
             print("🔄 Continuing tracking in foreground mode")
+            // Keep continuous updates but no need for background tasks
+        }
+
+        if isSpeedAlertActive {
+            print("🚨 Continuing speed alert in foreground mode")
             // Keep continuous updates but no need for background tasks
         }
     }
@@ -225,7 +241,7 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         }
 
         // Enable deferred location updates for battery optimization
-        if backgroundMode && locationManager.authorizationStatus == .authorizedAlways {
+        if (backgroundMode || isSpeedAlertActive) && locationManager.authorizationStatus == .authorizedAlways {
             enableDeferredLocationUpdates()
         }
     }
@@ -248,7 +264,7 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
             // Schedule task renewal before expiration (25 seconds instead of 30)
             DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
-                guard let self = self, self.isInBackground && self.isTracking else { return }
+                guard let self = self, self.isInBackground && (self.isTracking || self.isSpeedAlertActive) else { return }
                 print("🔄 Proactively renewing background task")
                 self.chainBackgroundTask()
             }
@@ -280,7 +296,7 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
             // Schedule next renewal
             DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
-                guard let self = self, self.isInBackground && self.isTracking else { return }
+                guard let self = self, self.isInBackground && (self.isTracking || self.isSpeedAlertActive) else { return }
                 self.chainBackgroundTask()
             }
         } else {
@@ -557,7 +573,7 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         }
 
         // Perform location update if tracking is active
-        if isTracking && backgroundMode {
+        if (isTracking && backgroundMode) || isSpeedAlertActive {
             print("📍 Performing background location update")
             locationManager.requestLocation()
 
@@ -582,7 +598,7 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         }
 
         // Perform any location data sync or processing
-        if isTracking {
+        if isTracking || isSpeedAlertActive {
             print("💾 Syncing location data in background")
             // Here you could sync data to server, process accumulated locations, etc.
 
@@ -636,6 +652,17 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
         let currentTime = Date().timeIntervalSince1970
 
+        // Print detailed location info if speed alert is active
+        if isSpeedAlertActive {
+            print("🚨 [SPEED ALERT] Location Update:")
+            print("  📍 Coordinates: \(location.coordinate.latitude), \(location.coordinate.longitude)")
+            print("  🚗 Speed: \(location.speed) m/s (\(String(format: "%.1f", location.speed * 3.6)) km/h)")
+            print("  📏 Accuracy: \(location.horizontalAccuracy)m")
+            print("  🧭 Bearing: \(location.course)°")
+            print("  ⏰ Time: \(DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .medium))")
+            print("  🌍 Altitude: \(location.altitude)m")
+        }
+
         if forceUpdateBackground {
             // Force update mode - always send location, no throttling
             print("✅ Location received (forced mode): lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
@@ -657,10 +684,12 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
             // Apply throttling for all modes to respect intervalMs parameter
             if timeSinceLastUpdate < minimumInterval {
-                print("⏭️ Skipping location update - respecting intervalMs throttling")
-                print("  - Time since last: \(String(format: "%.1f", timeSinceLastUpdate))s")
-                print("  - Required interval: \(String(format: "%.1f", minimumInterval))s")
-                print("  - Background mode: \(backgroundMode), In background: \(isInBackground)")
+                if !isSpeedAlertActive {
+                    print("⏭️ Skipping location update - respecting intervalMs throttling")
+                    print("  - Time since last: \(String(format: "%.1f", timeSinceLastUpdate))s")
+                    print("  - Required interval: \(String(format: "%.1f", minimumInterval))s")
+                    print("  - Background mode: \(backgroundMode), In background: \(isInBackground)")
+                }
                 return
             }
 
@@ -696,6 +725,34 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         print("Location authorization status changed to: \(status.rawValue)")
+
+        // Handle pending alert resolver if exists
+        if let resolver = pendingAlertResolver {
+            switch status {
+            case .authorizedAlways:
+                print("✅ Location permission granted (Always) for speed alert - enabling background monitoring")
+                startSpeedAlertLocationMonitoring()
+                resolver(true)
+            case .authorizedWhenInUse:
+                print("⚠️ Only When In Use permission granted - background monitoring may be limited")
+                startSpeedAlertLocationMonitoring()
+                resolver(true)
+            case .denied, .restricted:
+                print("❌ Location permission denied for speed alert")
+                resolver(false)
+            case .notDetermined:
+                print("📱 Location permission still not determined")
+                // Keep waiting for user decision
+                return
+            @unknown default:
+                print("❓ Unknown permission status for speed alert")
+                resolver(false)
+            }
+
+            // Clear pending resolvers
+            pendingAlertResolver = nil
+            pendingAlertRejecter = nil
+        }
 
         // Handle authorization changes
         if status == .authorizedAlways {
@@ -747,18 +804,133 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     // MARK: - Speed Alert Methods
 
-    @objc(listenerAlert:rejecter:)
-    func listenerAlert(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        print("🚨 Speed alert listener initialized")
+    @objc(turnOnAlert:rejecter:)
+    func turnOnAlert(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        print("🚨 Turning on speed alert")
 
-        // TODO: Implement speed alert logic here
-        // For now, just resolve the promise to indicate the listener is active
-        // In a real implementation, you would:
-        // 1. Set up speed monitoring
-        // 2. Configure speed limit detection
-        // 3. Monitor current speed vs speed limits
-        // 4. Send speed alert events via sendEvent(withName: "onSpeedAlert", body: alertData)
+        // Check current location permission status
+        let authorizationStatus = locationManager.authorizationStatus
+        print("🔒 Current location permission status: \(authorizationStatus.rawValue)")
 
-        resolver(nil)
+        switch authorizationStatus {
+        case .notDetermined:
+            print("📱 Location permission not determined, requesting Always permission for background...")
+            // Store the resolver to call it after permission is granted/denied
+            self.pendingAlertResolver = resolver
+            self.pendingAlertRejecter = rejecter
+            // Request Always permission for background location
+            locationManager.requestAlwaysAuthorization()
+            return
+
+        case .authorizedWhenInUse:
+            print("📱 Have When In Use permission, requesting Always permission for background...")
+            // Store the resolver to call it after permission is granted/denied
+            self.pendingAlertResolver = resolver
+            self.pendingAlertRejecter = rejecter
+            // Upgrade to Always permission for background location
+            locationManager.requestAlwaysAuthorization()
+            return
+
+        case .denied, .restricted:
+            print("❌ Location permission denied or restricted")
+            resolver(false)
+            return
+
+        case .authorizedAlways:
+            print("✅ Location permission granted (Always), starting background monitoring for speed alert")
+            startSpeedAlertLocationMonitoring()
+            resolver(true)
+            return
+
+        @unknown default:
+            print("❓ Unknown permission status")
+            resolver(false)
+            return
+        }
+    }
+
+    private func startSpeedAlertLocationMonitoring() {
+        print("🎯 Starting continuous location monitoring for speed alert")
+
+        isSpeedAlertActive = true
+
+        // Configure for high sensitivity to get frequent updates
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = 5.0 // Updated to 5 meters as requested
+
+        let currentAuth = locationManager.authorizationStatus
+        print("🔒 Current authorization for speed alert: \(currentAuth.rawValue)")
+
+        // Enable background location if we have always permission
+        if currentAuth == .authorizedAlways {
+            locationManager.allowsBackgroundLocationUpdates = true
+            locationManager.pausesLocationUpdatesAutomatically = false
+            print("✅ Background location monitoring enabled for speed alert (Always permission)")
+
+            // Start significant location changes for background efficiency
+            if CLLocationManager.significantLocationChangeMonitoringAvailable() {
+                locationManager.startMonitoringSignificantLocationChanges()
+                print("✅ Significant location change monitoring enabled")
+            }
+
+            // ✅ Use same background infrastructure as tracking
+            if isInBackground {
+                print("🌙 Starting background location tracking for speed alert")
+                startBackgroundLocationTracking()
+            }
+
+            // ✅ Enable deferred location updates for battery optimization
+            enableDeferredLocationUpdates()
+
+            // ✅ Schedule modern background tasks for iOS 13+
+            if #available(iOS 13.0, *) {
+                scheduleBackgroundLocationTask()
+                scheduleLocationSyncTask()
+            }
+        } else {
+            print("⚠️ Background location limited - only When In Use permission")
+            locationManager.allowsBackgroundLocationUpdates = false
+            locationManager.pausesLocationUpdatesAutomatically = true
+        }
+
+        // Start continuous location updates
+        locationManager.startUpdatingLocation()
+
+        print("🔄 Continuous location monitoring started for speed alert")
+        print("📏 Distance filter: 5.0m (updated)")
+        print("📍 Accuracy: Best available")
+        print("🌙 Background support: \(currentAuth == .authorizedAlways ? "Enabled with background tasks" : "Limited")")
+    }
+
+    private func stopSpeedAlertLocationMonitoring() {
+        print("🛑 Stopping speed alert location monitoring")
+
+        isSpeedAlertActive = false
+
+        // Only stop if we're not doing regular tracking
+        if !isTracking {
+            locationManager.stopUpdatingLocation()
+            locationManager.stopMonitoringSignificantLocationChanges()
+            locationManager.disallowDeferredLocationUpdates()
+
+            // Disable background location updates
+            if locationManager.authorizationStatus == .authorizedAlways {
+                locationManager.allowsBackgroundLocationUpdates = false
+            }
+
+            // End background task if no tracking is active
+            endBackgroundTask()
+
+            print("✅ Speed alert location monitoring stopped")
+        } else {
+            print("ℹ️ Regular tracking is active, keeping location monitoring")
+        }
+    }
+
+    @objc(turnOffAlert:rejecter:)
+    func turnOffAlert(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
+        print("🛑 Turning off speed alert")
+        stopSpeedAlertLocationMonitoring()
+        resolver(true)
     }
 }

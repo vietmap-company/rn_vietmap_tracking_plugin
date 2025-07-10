@@ -7,8 +7,6 @@ import type {
   TrackingStatus,
   LocationUpdateCallback,
   TrackingStatusCallback,
-  LocationErrorCallback,
-  PermissionChangeCallback,
   SpeedAlertEvent,
   SpeedAlertCallback
 } from './types';
@@ -18,6 +16,54 @@ const eventEmitter = new NativeEventEmitter(NativeModules.RnVietmapTrackingPlugi
 
 export function multiply(a: number, b: number): number {
   return RnVietmapTrackingPlugin.multiply(a, b);
+}
+
+/**
+ * Start GPS location tracking with specified configuration
+ * @param config - Configuration for location tracking
+ * @returns Promise<boolean> - Success status
+ */
+export async function startLocationTracking(config: LocationTrackingConfig): Promise<boolean> {
+  try {
+    // Request permissions first
+    const hasPermission = await RnVietmapTrackingPlugin.hasLocationPermissions();
+    if (!hasPermission) {
+      const permissionResult = await RnVietmapTrackingPlugin.requestLocationPermissions();
+      if (permissionResult !== 'granted') {
+        throw new Error('Location permission denied');
+      }
+    }
+
+    // Extract parameters from config for native call
+    const backgroundMode = config.backgroundMode || false;
+    const intervalMs = config.intervalMs || 5000;
+    const distanceFilter = config.distanceFilter || 10;
+
+    const result = await RnVietmapTrackingPlugin.startTracking(
+      backgroundMode,
+      intervalMs,
+      false, // forceUpdateBackground default to false
+      distanceFilter
+    );
+    return result === 'success';
+  } catch (error) {
+    console.error('Failed to start location tracking:', error);
+    throw error;
+  }
+}
+
+/**
+ * Stop GPS location tracking
+ * @returns Promise<boolean> - Success status
+ */
+export async function stopLocationTracking(): Promise<boolean> {
+  try {
+    const result = await RnVietmapTrackingPlugin.stopTracking();
+    return result === 'success';
+  } catch (error) {
+    console.error('Failed to stop location tracking:', error);
+    return false;
+  }
 }
 
 /**
@@ -72,14 +118,6 @@ export async function hasLocationPermissions(): Promise<boolean> {
 }
 
 /**
- * Request "Always" location permissions for background tracking
- * @returns Promise<string> - Permission status
- */
-export async function requestAlwaysLocationPermissions(): Promise<string> {
-  return RnVietmapTrackingPlugin.requestAlwaysLocationPermissions();
-}
-
-/**
  * Subscribe to location updates
  * @param callback - Callback function to receive location updates
  * @returns Subscription object with remove method
@@ -95,24 +133,6 @@ export function addLocationUpdateListener(callback: LocationUpdateCallback) {
  */
 export function addTrackingStatusListener(callback: TrackingStatusCallback) {
   return eventEmitter.addListener('onTrackingStatusChanged', callback);
-}
-
-/**
- * Subscribe to location errors
- * @param callback - Callback function to receive error information
- * @returns Subscription object with remove method
- */
-export function addLocationErrorListener(callback: (error: { error: string; code: string; timestamp: number }) => void) {
-  return eventEmitter.addListener('onLocationError', callback);
-}
-
-/**
- * Subscribe to permission changes
- * @param callback - Callback function to receive permission status changes
- * @returns Subscription object with remove method
- */
-export function addPermissionChangeListener(callback: (permission: { status: string; timestamp: number }) => void) {
-  return eventEmitter.addListener('onPermissionChanged', callback);
 }
 
 /**
@@ -145,95 +165,34 @@ export function createDefaultConfig(intervalMs: number = 5000): LocationTracking
 }
 
 /**
- * Enhanced GPS tracking methods using background_location_2 strategy
+ * Turn on speed alert monitoring (native handles permission checking)
+ * @returns Promise<boolean> - Returns true if speed alert turned on successfully, false otherwise
  */
-
-/**
- * Start GPS tracking with continuous location updates
- * @param backgroundMode - Enable background tracking (requires 'Always' permission)
- * @param intervalMs - Update interval in milliseconds for throttling
- * @param forceUpdateBackground - Force continuous updates bypassing distance filter and OS throttling
- * @param distanceFilter - Minimum distance in meters for location updates (default: 10m)
- * @returns Promise<string> - Status message
- */
-export async function startTracking(
-  backgroundMode: boolean,
-  intervalMs: number = 5000,
-  forceUpdateBackground: boolean = false,
-  distanceFilter: number = 10
-): Promise<string> {
+export async function turnOnAlert(): Promise<boolean> {
   try {
-    console.log('🚀 Starting enhanced tracking with background_location_2 strategy');
-    console.log('📤 Background mode:', backgroundMode);
-    console.log('📤 Interval:', intervalMs, 'ms');
-    console.log('📤 Force update background:', forceUpdateBackground);
-    console.log('📤 Distance filter:', distanceFilter, 'm');
-
-    // Request appropriate permissions
-    if (backgroundMode) {
-      const alwaysPermission = await RnVietmapTrackingPlugin.requestAlwaysLocationPermissions();
-      if (alwaysPermission !== 'granted') {
-        throw new Error('Background tracking requires "Always" location permission');
-      }
-    } else {
-      const hasPermission = await RnVietmapTrackingPlugin.hasLocationPermissions();
-      if (!hasPermission) {
-        const permissionResult = await RnVietmapTrackingPlugin.requestLocationPermissions();
-        if (permissionResult !== 'granted') {
-          throw new Error('Location permission denied');
-        }
-      }
-    }
-
-    return await RnVietmapTrackingPlugin.startTracking(backgroundMode, intervalMs, forceUpdateBackground, distanceFilter);
+    return await RnVietmapTrackingPlugin.turnOnAlert();
   } catch (error) {
-    console.error('Failed to start enhanced tracking:', error);
-    throw error;
+    console.error('❌ Failed to turn on speed alert:', error);
+    return false;
   }
 }
 
 /**
- * Stop GPS tracking
- * @returns Promise<string> - Status message
+ * Turn off speed alert monitoring
+ * @returns Promise<boolean> - Returns true if speed alert turned off successfully, false otherwise
  */
-export async function stopTracking(): Promise<string> {
+export async function turnOffAlert(): Promise<boolean> {
   try {
-    console.log('🛑 Stopping enhanced tracking');
-    return await RnVietmapTrackingPlugin.stopTracking();
+    return await RnVietmapTrackingPlugin.turnOffAlert();
   } catch (error) {
-    console.error('Failed to stop enhanced tracking:', error);
-    throw error;
+    console.error('❌ Failed to turn off speed alert:', error);
+    return false;
   }
 }
 
-/**
- * Speed Alert Function
- */
-
-/**
- * Start listening for speed alerts
- * This function will set up speed alert monitoring and return callback data when speed limits are exceeded
- * @param callback - Callback function to receive speed alert data
- * @returns Subscription object with remove method
- */
-export async function listenerAlert(callback: (alert: SpeedAlertEvent) => void) {
-  try {
-    console.log('🚨 Starting speed alert listener');
-
-    // Call native method to initialize speed alert monitoring
-    await RnVietmapTrackingPlugin.listenerAlert();
-
-    // Subscribe to speed alert events from native
-    const subscription = eventEmitter.addListener('onSpeedAlert', callback);
-
-    console.log('✅ Speed alert listener activated');
-    return subscription;
-
-  } catch (error) {
-    console.error('❌ Failed to start speed alert listener:', error);
-    throw error;
-  }
-}
+// Alias functions for backward compatibility
+export const startTracking = startLocationTracking;
+export const stopTracking = stopLocationTracking;
 
 // Export utilities and presets
 export { TrackingPresets, LocationUtils, TrackingSession } from './utils';
@@ -251,8 +210,6 @@ export type {
   TrackingStatus,
   LocationUpdateCallback,
   TrackingStatusCallback,
-  LocationErrorCallback,
-  PermissionChangeCallback,
   SpeedAlertEvent,
   SpeedAlertCallback
 };
