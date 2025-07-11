@@ -63,6 +63,10 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
         // Initialize Speech Synthesizer
         speechSynthesizer = AVSpeechSynthesizer()
+        speechSynthesizer.delegate = self
+
+        // Configure audio session for background speech synthesis
+        configureAudioSessionForSpeech()
 
         // Configure location manager for better battery life
         locationManager.pausesLocationUpdatesAutomatically = false
@@ -238,6 +242,9 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     @objc private func appWillEnterForeground() {
         print("📱 App entering foreground")
         isInBackground = false
+
+        // Reconfigure audio session for foreground
+        configureAudioSessionForSpeech()
 
         // End background task
         endBackgroundTask()
@@ -678,31 +685,59 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
         let currentTime = Date().timeIntervalSince1970
 
-        // Print detailed location info if speed alert is active
+        // OPTION 1: Completely separate speed alert and tracking logic
+        // Process location for speed alert if active (independent processing)
         if isSpeedAlertActive {
-            print("🚨 [SPEED ALERT] Location Update:")
-            print("  📍 Coordinates: \(location.coordinate.latitude), \(location.coordinate.longitude)")
-            print("  🚗 Speed: \(location.speed) m/s (\(String(format: "%.1f", location.speed * 3.6)) km/h)")
-            print("  📏 Accuracy: \(location.horizontalAccuracy)m")
-            print("  🧭 Bearing: \(location.course)°")
-            print("  ⏰ Time: \(DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .medium))")
-            print("  🌍 Altitude: \(location.altitude)m")
-
-            // Process route boundary detection for speed alert mode
-            print("🚨 [SPEED ALERT] Processing route boundary detection...")
-
-            // Update current link index based on location
-            updateCurrentLinkIndex(for: location)
-
-            // Check if we need to request new route data from the server
-            if shouldRequestNewRouteData(for: location) {
-                requestRouteDataFromAPI(for: location)
-            }
-
-            // Note: Speed limit checking is now only done when new route data is received
-            // This prevents continuous speech alerts on every location update
+            processLocationForSpeedAlert(location: location, currentTime: currentTime)
         }
 
+        // Process location for tracking if active (independent processing)
+        if isTracking {
+            processLocationForTracking(location: location, currentTime: currentTime)
+        }
+    }
+
+    // MARK: - Speed Alert Location Processing
+    private func processLocationForSpeedAlert(location: CLLocation, currentTime: TimeInterval) {
+        // ✅ OPTION 1: Independent Speed Alert Processing
+        // This function processes location updates ONLY for speed alert functionality
+        // - Route boundary detection for speed limit monitoring
+        // - API requests for route data
+        // - Speed limit change detection and announcements
+        // - NO tracking location events to React Native
+
+        print("🚨 [SPEED ALERT] Location Update:")
+        print("  📍 Coordinates: \(location.coordinate.latitude), \(location.coordinate.longitude)")
+        print("  🚗 Speed: \(location.speed) m/s (\(String(format: "%.1f", location.speed * 3.6)) km/h)")
+        print("  📏 Accuracy: \(location.horizontalAccuracy)m")
+        print("  🧭 Bearing: \(location.course)°")
+        print("  ⏰ Time: \(DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .medium))")
+        print("  🌍 Altitude: \(location.altitude)m")
+
+        // Process route boundary detection for speed alert mode
+        print("🚨 [SPEED ALERT] Processing route boundary detection...")
+
+        // Update current link index based on location
+        updateCurrentLinkIndex(for: location)
+
+        // Check if we need to request new route data from the server
+        if shouldRequestNewRouteData(for: location) {
+            requestRouteDataFromAPI(for: location)
+        }
+
+        // Note: Speed limit checking is now only done when new route data is received
+        // This prevents continuous speech alerts on every location update
+    }
+
+    // MARK: - Tracking Location Processing
+    private func processLocationForTracking(location: CLLocation, currentTime: TimeInterval) {
+        // ✅ OPTION 1: Independent Tracking Processing
+        // This function processes location updates ONLY for tracking functionality
+        // - Sends location updates to React Native
+        // - Handles throttling and forced update modes
+        // - NO speed alert or route boundary detection
+
+        // Handle location updates for React Native based on tracking mode (keep existing logic)
         if forceUpdateBackground {
             // Force update mode - always send location, no throttling
             print("✅ Location received (forced mode): lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
@@ -724,12 +759,6 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
             // Apply throttling for all modes to respect intervalMs parameter
             if timeSinceLastUpdate < minimumInterval {
-                if !isSpeedAlertActive {
-                    print("⏭️ Skipping location update - respecting intervalMs throttling")
-                    print("  - Time since last: \(String(format: "%.1f", timeSinceLastUpdate))s")
-                    print("  - Required interval: \(String(format: "%.1f", minimumInterval))s")
-                    print("  - Background mode: \(backgroundMode), In background: \(isInBackground)")
-                }
                 return
             }
 
@@ -748,21 +777,6 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             sendEvent(withName: "onLocationUpdate", body: locationDict)
 
             print("📡 Location event sent to React Native (continuous updates)")
-        }        // MARK: - Route Boundary Detection & API Management
-        // Only process if not already handled by speed alert above
-        if !isSpeedAlertActive {
-            // Update current link index based on location
-            updateCurrentLinkIndex(for: location)
-
-            // Check if we need to request new route data from the server
-            if shouldRequestNewRouteData(for: location) {
-                requestRouteDataFromAPI(for: location)
-            }
-
-            // Note: Speed limit checking removed from regular tracking
-            // Speed alerts are now only triggered when new route data is received
-        } else {
-            print("🚨 Route boundary detection already handled by speed alert - skipping duplicate processing")
         }
     }
 
@@ -861,6 +875,20 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     // MARK: - Speech Synthesis for Speed Alerts
 
+    // Configure audio session for background speech synthesis
+    private func configureAudioSessionForSpeech() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback,
+                                       mode: .spokenAudio,
+                                       options: [.duckOthers, .allowBluetoothA2DP, .interruptSpokenAudioAndMixWithOthers])
+            try audioSession.setActive(true)
+            print("✅ Audio session configured for background speech synthesis")
+        } catch {
+            print("❌ Failed to configure audio session for speech: \(error)")
+        }
+    }
+
     private func speakSpeedLimitAnnouncement(speedLimit: Int) {
         // Check cooldown to avoid too frequent announcements
         let currentTime = Date().timeIntervalSince1970
@@ -870,13 +898,16 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
         lastSpeedAlertTime = currentTime
 
+        // Configure audio session for background speech (ensure it works in background)
+        configureAudioSessionForSpeech()
+
         // Stop any current speech
         if speechSynthesizer.isSpeaking {
             speechSynthesizer.stopSpeaking(at: .immediate)
         }
 
         // Create speed limit announcement message
-        let message = "Giới hạn tốc độ \(speedLimit) ki-lô-mét trên giờ"
+        let message = "Tốc độ cho phép \(speedLimit) ki-lô-mét trên giờ"
 
         let utterance = AVSpeechUtterance(string: message)
         utterance.voice = AVSpeechSynthesisVoice(language: "vi-VN") ?? AVSpeechSynthesisVoice(language: "en-US")
@@ -885,7 +916,30 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         utterance.pitchMultiplier = 1.0 // Normal pitch for informational announcements
 
         print("🔊 Speaking speed limit announcement: \(message)")
+        print("🌙 Background mode: \(isInBackground ? "YES" : "NO")")
+
+        // Start background task to ensure speech completes even in background
+        var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "SpeechAnnouncement") {
+            print("⏰ Speech background task expiring")
+            if backgroundTaskId != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                backgroundTaskId = .invalid
+            }
+        }
+
+        // Store background task ID for cleanup in delegate
         speechSynthesizer.speak(utterance)
+
+        // End background task after speech duration (estimated)
+        let estimatedSpeechDuration = TimeInterval(message.count) * 0.1 + 2.0 // Rough estimate
+        DispatchQueue.main.asyncAfter(deadline: .now() + estimatedSpeechDuration) {
+            if backgroundTaskId != .invalid {
+                print("✅ Ending speech background task")
+                UIApplication.shared.endBackgroundTask(backgroundTaskId)
+                backgroundTaskId = .invalid
+            }
+        }
     }
 
     @objc(turnOnAlert:rejecter:)
@@ -1527,48 +1581,6 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         }
     }
 
-    private func checkSpeedLimitsForCurrentLocation() {
-        guard let currentIndex = currentLinkIndex,
-              let routeData = currentRouteData,
-              let links = routeData["links"] as? [[String: Any]],
-              currentIndex < links.count else {
-            return
-        }
-
-        let currentLink = links[currentIndex]
-
-        // Get speed limits for current link
-        if let speedLimits = currentLink["speedLimits"] as? [[Int]] {
-            for speedLimitData in speedLimits {
-                if speedLimitData.count >= 2 {
-                    let currentSpeedLimit = speedLimitData[1] // Speed limit value
-
-                    // Only announce if speed limit is different from previous link
-                    if currentSpeedLimit != previousLinkSpeedLimit && currentSpeedLimit > 0 {
-                        print("🚨 SPEED LIMIT CHANGED: Previous: \(previousLinkSpeedLimit ?? 0) → Current: \(currentSpeedLimit) km/h")
-
-                        // Announce the new speed limit (not violation, just information)
-                        speakSpeedLimitAnnouncement(speedLimit: currentSpeedLimit)
-
-                        // Update previous speed limit
-                        previousLinkSpeedLimit = currentSpeedLimit
-                    }
-
-                    // Break after first speed limit (assuming one speed limit per link)
-                    break
-                }
-            }
-        } else {
-            // No speed limit for current link
-            if previousLinkSpeedLimit != nil {
-                print("🚨 SPEED LIMIT REMOVED: Previous: \(previousLinkSpeedLimit ?? 0) → Current: No limit")
-                previousLinkSpeedLimit = nil
-                // Optionally announce that speed limit has been removed
-                // speakSpeedLimitRemoved()
-            }
-        }
-    }
-
     // MARK: - Enhanced Map Matching for Route Following
 
     private struct RouteMatchingResult {
@@ -1794,5 +1806,37 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         let c = 2 * atan2(sqrt(a), sqrt(1-a))
 
         return R * c
+    }
+}
+
+// MARK: - AVSpeechSynthesizerDelegate
+
+extension RnVietmapTrackingPlugin: AVSpeechSynthesizerDelegate {
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        print("🔊 Speech started: \(utterance.speechString)")
+        print("🌙 Background mode: \(isInBackground ? "YES" : "NO")")
+
+        // Ensure audio session remains active during speech
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("❌ Failed to keep audio session active: \(error)")
+        }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        print("✅ Speech finished: \(utterance.speechString)")
+
+        // Keep audio session active for potential future announcements
+        // Don't deactivate immediately to avoid audio interruptions
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        print("❌ Speech cancelled: \(utterance.speechString)")
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
+        // Optional: Could be used for visual feedback or word-by-word highlighting
     }
 }
