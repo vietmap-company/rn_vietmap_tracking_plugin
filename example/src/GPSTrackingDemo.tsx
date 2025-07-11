@@ -220,7 +220,6 @@ const GPSTrackingDemo = () => {
         const success = await turnOnAlert();
         if (success) {
           setIsSpeedAlertEnabled(true);
-          Alert.alert('✅ Speed Alert', 'Speed alert turned on successfully');
         } else {
           Alert.alert('❌ Error', 'Failed to turn on speed alert');
         }
@@ -229,7 +228,6 @@ const GPSTrackingDemo = () => {
         const success = await turnOffAlert();
         if (success) {
           setIsSpeedAlertEnabled(false);
-          Alert.alert('🛑 Speed Alert', 'Speed alert turned off successfully (speech alerts disabled)');
         } else {
           Alert.alert('❌ Error', 'Failed to turn off speed alert');
         }

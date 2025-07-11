@@ -985,10 +985,10 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
           putInt("id", linkId)
           putInt("direction", direction)
           if (coordinates != null && coordinates.size() >= 4) {
-            putDouble("startLat", coordinates.getDouble(0))
-            putDouble("startLon", coordinates.getDouble(1))
-            putDouble("endLat", coordinates.getDouble(2))
-            putDouble("endLon", coordinates.getDouble(3))
+            putDouble("startLat", coordinates.getDouble(1))
+            putDouble("startLon", coordinates.getDouble(0))
+            putDouble("endLat", coordinates.getDouble(3))
+            putDouble("endLon", coordinates.getDouble(2))
           }
           putInt("distance", distance)
           putArray("speedLimits", speedLimits)
@@ -1094,29 +1094,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     startLat: Double, startLon: Double,
     endLat: Double, endLon: Double
   ): Double {
-    // Simplified distance calculation (should use proper geodesic calculation in production)
-    val A = pointLat - startLat
-    val B = pointLon - startLon
-    val C = endLat - startLat
-    val D = endLon - startLon
-
-    val dot = A * C + B * D
-    val lenSq = C * C + D * D
-
-    if (lenSq == 0.0) {
-      return kotlin.math.sqrt(A * A + B * B)
-    }
-
-    val param = dot / lenSq
-    val clampedParam = kotlin.math.max(0.0, kotlin.math.min(1.0, param))
-
-    val closestLat = startLat + clampedParam * C
-    val closestLon = startLon + clampedParam * D
-
-    val deltaLat = pointLat - closestLat
-    val deltaLon = pointLon - closestLon
-
-    return kotlin.math.sqrt(deltaLat * deltaLat + deltaLon * deltaLon) * 111000 // Convert to meters approximately
+    // Use proper geodesic distance calculation via Haversine formula
+    val snappedLocation = snapToLineSegment(pointLat, pointLon, startLat, startLon, endLat, endLon)
+    return calculateDistance(pointLat, pointLon, snappedLocation.latitude, snappedLocation.longitude)
   }
 
   private fun findAlertsForLink(linkIndex: Int, alerts: ReadableArray): WritableArray {
@@ -1424,26 +1404,47 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     var bestMatch: RouteMatchingResult? = null
     var bestScore = Double.MAX_VALUE
 
-    // Check current link first (higher priority)
+    Log.d(NAME, "🔍 [DEBUG] findBestRouteMatch - Starting search for location: (${location.latitude}, ${location.longitude})")
+    Log.d(NAME, "🔍 [DEBUG] Current link index: ${currentLinkIndex ?: -1}, Total links: ${links.size()}")
+
+    // Check current link first (higher priority) if exists
     currentLinkIndex?.let { currentIndex ->
       if (currentIndex < links.size()) {
         val currentLink = links.getMap(currentIndex)
         if (currentLink != null) {
           val currentLinkMatch = evaluateLinkMatch(location, currentLink, currentIndex, true)
 
+          Log.d(NAME, "🔍 [DEBUG] Current link evaluation:")
+          Log.d(NAME, "  - Distance: ${"%.1f".format(currentLinkMatch.distanceToRoute)}m")
+          Log.d(NAME, "  - Confidence: ${"%.1f".format(currentLinkMatch.confidence * 100)}%")
+
           if (currentLinkMatch.distanceToRoute <= routeBoundaryThreshold * 1.5) { // More lenient for current link
             bestMatch = currentLinkMatch
             bestScore = currentLinkMatch.distanceToRoute
+            Log.d(NAME, "🔍 [DEBUG] Current link accepted as candidate")
           }
         }
       }
     }
 
-    // Check adjacent links (look ahead and behind)
-    val searchRange = minOf(3, links.size()) // Check up to 3 links ahead/behind
-    val currentIdx = currentLinkIndex ?: 0
-    val startIndex = maxOf(0, currentIdx - searchRange)
-    val endIndex = minOf(links.size() - 1, currentIdx + searchRange)
+    // Determine search strategy
+    val searchAll = currentLinkIndex == null || bestMatch == null
+    val searchRange = if (searchAll) links.size() else minOf(5, links.size()) // Search more links if no current link
+
+    val startIndex: Int
+    val endIndex: Int
+
+    if (searchAll) {
+      // Search all links if no current link or no good match
+      startIndex = 0
+      endIndex = links.size() - 1
+      Log.d(NAME, "🔍 [DEBUG] Searching ALL links (no current link or poor match)")
+    } else {
+      // Search adjacent links only
+      startIndex = maxOf(0, (currentLinkIndex ?: 0) - searchRange)
+      endIndex = minOf(links.size() - 1, (currentLinkIndex ?: 0) + searchRange)
+      Log.d(NAME, "🔍 [DEBUG] Searching adjacent links: $startIndex to $endIndex")
+    }
 
     for (i in startIndex..endIndex) {
       if (i == currentLinkIndex) continue // Already checked
@@ -1451,25 +1452,42 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       val link = links.getMap(i) ?: continue
       val linkMatch = evaluateLinkMatch(location, link, i, false)
 
+      Log.d(NAME, "🔍 [DEBUG] Link $i evaluation:")
+      Log.d(NAME, "  - Distance: ${"%.1f".format(linkMatch.distanceToRoute)}m")
+      Log.d(NAME, "  - Confidence: ${"%.1f".format(linkMatch.confidence * 100)}%")
+
       // Scoring: distance + direction consistency + sequence penalty
-      val sequencePenalty = kotlin.math.abs(i - currentIdx) * 10.0 // Prefer nearby links
+      val sequencePenalty = if (searchAll) 0.0 else kotlin.math.abs(i - (currentLinkIndex ?: i)) * 5.0 // Reduced penalty
       val totalScore = linkMatch.distanceToRoute + sequencePenalty
 
-      if (totalScore < bestScore && linkMatch.distanceToRoute <= routeBoundaryThreshold) {
+      val isAcceptable = linkMatch.distanceToRoute <= routeBoundaryThreshold * 2.0 // More lenient threshold
+
+      if (totalScore < bestScore && isAcceptable) {
         bestMatch = linkMatch
         bestScore = totalScore
+        Log.d(NAME, "🔍 [DEBUG] Link $i accepted as new best candidate (score: ${"%.1f".format(totalScore)})")
       }
     }
 
-    // If no good match found, return default
-    return bestMatch ?: RouteMatchingResult(
-      isWithinRoute = false,
-      snappedLocation = null,
-      linkIndex = null,
-      distanceToRoute = Double.MAX_VALUE,
-      progressOnLink = 0.0,
-      confidence = 0.0
-    )
+    // If still no good match found, return default
+    if (bestMatch == null) {
+      Log.d(NAME, "🔍 [DEBUG] No match found - returning nil result")
+      return RouteMatchingResult(
+        isWithinRoute = false,
+        snappedLocation = null,
+        linkIndex = null,
+        distanceToRoute = Double.MAX_VALUE,
+        progressOnLink = 0.0,
+        confidence = 0.0
+      )
+    }
+
+    Log.d(NAME, "🔍 [DEBUG] Best match found:")
+    Log.d(NAME, "  - Link index: ${bestMatch.linkIndex}")
+    Log.d(NAME, "  - Distance: ${"%.1f".format(bestMatch.distanceToRoute)}m")
+    Log.d(NAME, "  - Confidence: ${"%.1f".format(bestMatch.confidence * 100)}%")
+
+    return bestMatch
   }
 
   private fun evaluateLinkMatch(location: Location, link: ReadableMap, linkIndex: Int, isCurrentLink: Boolean): RouteMatchingResult {
@@ -1481,6 +1499,11 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     val currentLat = location.latitude
     val currentLon = location.longitude
 
+    Log.d(NAME, "🔍 [DEBUG] evaluateLinkMatch - Link $linkIndex:")
+    Log.d(NAME, "  - GPS: ($currentLat, $currentLon)")
+    Log.d(NAME, "  - Link Start: ($startLat, $startLon)")
+    Log.d(NAME, "  - Link End: ($endLat, $endLon)")
+
     // Calculate closest point on link segment (snap-to-route)
     val snappedPoint = snapToLineSegment(
       currentLat, currentLon,
@@ -1488,11 +1511,15 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       endLat, endLon
     )
 
+    Log.d(NAME, "  - Snapped point: (${snappedPoint.latitude}, ${snappedPoint.longitude})")
+
     // Calculate distance from GPS point to snapped point
     val distanceToRoute = calculateDistance(
       currentLat, currentLon,
       snappedPoint.latitude, snappedPoint.longitude
     )
+
+    Log.d(NAME, "  - Distance to route: ${"%.1f".format(distanceToRoute)}m")
 
     // Calculate progress along the link (0.0 to 1.0)
     val progressOnLink = calculateProgressOnLink(
@@ -1500,6 +1527,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       startLat, startLon,
       endLat, endLon
     )
+
+    Log.d(NAME, "  - Progress on link: ${"%.2f".format(progressOnLink)}")
 
     // Calculate confidence based on multiple factors
     val confidence = calculateMatchingConfidence(
@@ -1512,6 +1541,10 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     // Enhanced threshold based on movement direction and speed
     val dynamicThreshold = calculateDynamicThreshold(location, isCurrentLink)
     val isWithinRoute = distanceToRoute <= dynamicThreshold
+
+    Log.d(NAME, "  - Dynamic threshold: ${"%.1f".format(dynamicThreshold)}m")
+    Log.d(NAME, "  - Is within route: $isWithinRoute")
+    Log.d(NAME, "  - Final confidence: ${"%.1f".format(confidence * 100)}%")
 
     return RouteMatchingResult(
       isWithinRoute = isWithinRoute,
@@ -1579,28 +1612,51 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     isCurrentLink: Boolean,
     location: Location
   ): Double {
+    Log.d(NAME, "🔍 [DEBUG] calculateMatchingConfidence:")
+    Log.d(NAME, "  - Distance to route: ${"%.1f".format(distanceToRoute)}m")
+    Log.d(NAME, "  - Is current link: $isCurrentLink")
+    Log.d(NAME, "  - GPS accuracy: ${"%.1f".format(location.accuracy)}m")
+
     var confidence = 1.0
 
-    // Distance factor (closer = higher confidence)
-    val distanceFactor = maxOf(0.0, 1.0 - (distanceToRoute / (routeBoundaryThreshold * 2)))
+    // Distance factor (closer = higher confidence) - more generous scoring
+    val maxDistance = routeBoundaryThreshold * 3.0 // Allow for wider matching
+    val distanceFactor = maxOf(0.1, 1.0 - (distanceToRoute / maxDistance)) // Minimum 10% confidence
     confidence *= distanceFactor
+    Log.d(NAME, "  - Distance factor: ${"%.2f".format(distanceFactor)}")
 
-    // GPS accuracy factor
-    val accuracyFactor = if (location.accuracy < 20) 1.0 else maxOf(0.5, 20.0 / location.accuracy)
+    // GPS accuracy factor - more lenient
+    val accuracyFactor: Double = if (location.accuracy < 10) {
+      1.0
+    } else if (location.accuracy < 50) {
+      maxOf(0.6, 1.0 - (location.accuracy - 10) / 40)
+    } else {
+      0.5 // Still give some confidence for poor GPS
+    }
     confidence *= accuracyFactor
+    Log.d(NAME, "  - Accuracy factor: ${"%.2f".format(accuracyFactor)}")
 
     // Current link bonus
     if (isCurrentLink) {
-      confidence *= 1.2
+      confidence *= 1.3 // Increased bonus for current link
+      Log.d(NAME, "  - Current link bonus applied")
     }
 
     // Speed consistency (if moving, prefer links in direction of movement)
-    if (location.speed > 1.0 && location.bearing >= 0) { // Moving with valid bearing
-      // This could be enhanced with bearing comparison to link direction
-      confidence *= 1.1
+    if (location.speed > 1.0 && location.bearing >= 0) { // Moving with valid course
+      confidence *= 1.15
+      Log.d(NAME, "  - Movement bonus applied")
     }
 
-    return maxOf(0.0, minOf(1.0, confidence))
+    // Ensure minimum confidence for close matches
+    if (distanceToRoute <= routeBoundaryThreshold) {
+      confidence = maxOf(confidence, 0.4) // Minimum 40% confidence for close matches
+    }
+
+    val finalConfidence = maxOf(0.0, minOf(1.0, confidence))
+    Log.d(NAME, "  - Final confidence: ${"%.2f".format(finalConfidence)}")
+
+    return finalConfidence
   }
 
   private fun calculateDynamicThreshold(location: Location, isCurrentLink: Boolean): Double {

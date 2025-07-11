@@ -671,6 +671,37 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             print("❌ Failed to schedule location sync task: \(error)")
         }
     }
+
+    // Debug function to log route links information
+    private func debugLogRouteLinks(_ links: [[String: Any]], location: CLLocation) {
+        print("🔍 [DEBUG] Route Links Debug Information:")
+        print("  Current location: (\(location.coordinate.latitude), \(location.coordinate.longitude))")
+        print("  Total links: \(links.count)")
+
+        for (index, link) in links.enumerated() {
+            if let startLat = link["startLat"] as? Double,
+               let startLon = link["startLon"] as? Double,
+               let endLat = link["endLat"] as? Double,
+               let endLon = link["endLon"] as? Double {
+
+                let distance = distanceToLineSegment(
+                    pointLat: location.coordinate.latitude, pointLon: location.coordinate.longitude,
+                    startLat: startLat, startLon: startLon,
+                    endLat: endLat, endLon: endLon
+                )
+
+                print("  Link \(index): Start(\(startLat), \(startLon)) → End(\(endLat), \(endLon)), Distance: \(String(format: "%.1f", distance))m")
+
+                if let speedLimits = link["speedLimits"] as? [[Int]] {
+                    for speedLimit in speedLimits {
+                        if speedLimit.count >= 2 {
+                            print("    Speed Limit: \(speedLimit[1]) km/h")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - CLLocationManagerDelegate
@@ -1090,10 +1121,10 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
                 let processedLink: [String: Any] = [
                     "id": linkId,
                     "direction": direction,
-                    "startLat": coordinates.count > 0 ? coordinates[0] : 0.0,
-                    "startLon": coordinates.count > 1 ? coordinates[1] : 0.0,
-                    "endLat": coordinates.count > 2 ? coordinates[2] : 0.0,
-                    "endLon": coordinates.count > 3 ? coordinates[3] : 0.0,
+                    "startLat": coordinates.count > 1 ? coordinates[1] : 0.0,
+                    "startLon": coordinates.count > 0 ? coordinates[0] : 0.0,
+                    "endLat": coordinates.count > 3 ? coordinates[3] : 0.0,
+                    "endLon": coordinates.count > 2 ? coordinates[2] : 0.0,
                     "distance": distance,
                     "speedLimits": speedLimits
                 ]
@@ -1184,7 +1215,8 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
     private func distanceToLineSegment(pointLat: Double, pointLon: Double,
                                      startLat: Double, startLon: Double,
                                      endLat: Double, endLon: Double) -> Double {
-        // Simplified distance calculation (should use proper geodesic calculation in production)
+
+        // First, find the closest point on the line segment
         let A = pointLat - startLat
         let B = pointLon - startLon
         let C = endLat - startLat
@@ -1194,7 +1226,8 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         let lenSq = C * C + D * D
 
         if lenSq == 0 {
-            return sqrt(A * A + B * B)
+            // Degenerate segment (start == end point)
+            return calculateDistance(lat1: pointLat, lon1: pointLon, lat2: startLat, lon2: startLon)
         }
 
         let param = dot / lenSq
@@ -1203,10 +1236,8 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         let closestLat = startLat + clampedParam * C
         let closestLon = startLon + clampedParam * D
 
-        let deltaLat = pointLat - closestLat
-        let deltaLon = pointLon - closestLon
-
-        return sqrt(deltaLat * deltaLat + deltaLon * deltaLon) * 111000 // Convert to meters approximately
+        // Use Haversine formula for accurate distance calculation
+        return calculateDistance(lat1: pointLat, lon1: pointLon, lat2: closestLat, lon2: closestLon)
     }
 
     private func findAlertsForLink(linkIndex: Int, alerts: [[Any]]) -> [[String: Any]] {
@@ -1221,7 +1252,7 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
                 let alertInfo: [String: Any] = [
                     "type": alert[0],
                     "subtype": alert[1],
-                    "speedLimit": alert[2],
+                    "speedLimit": alert[2] ?? NSNull(),
                     "distance": distance,
                     "linkIndex": linkIndex
                 ]
@@ -1238,47 +1269,7 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     // MARK: - Route Boundary Detection & API Management
 
-    private func updateCurrentLinkIndex(location: CLLocation) {
-        guard let routeData = currentRouteData,
-              let links = routeData["links"] as? [[String: Any]] else {
-            return
-        }
-
-        // Find the closest link to the current location
-        var closestLinkIndex: Int?
-        var minDistance = Double.infinity
-
-        for (index, link) in links.enumerated() {
-            if let startLat = link["startLat"] as? Double,
-               let startLon = link["startLon"] as? Double,
-               let endLat = link["endLat"] as? Double,
-               let endLon = link["endLon"] as? Double {
-
-                // Calculate distance to the link segment
-                let distance = distanceToLineSegment(
-                    pointLat: location.coordinate.latitude, pointLon: location.coordinate.longitude,
-                    startLat: startLat, startLon: startLon,
-                    endLat: endLat, endLon: endLon
-                )
-
-                if distance < minDistance {
-                    minDistance = distance
-                    closestLinkIndex = index
-                }
-            }
-        }
-
-        // Update the current link index if it's different
-        if closestLinkIndex != currentLinkIndex {
-            currentLinkIndex = closestLinkIndex
-            print("📍 Current link index updated: \(currentLinkIndex ?? -1)")
-
-            // Check speed limits when link changes (only for speed alert mode)
-            if isSpeedAlertActive {
-                checkSpeedLimitChanges()
-            }
-        }
-    }
+    // REMOVED: Old updateCurrentLinkIndex implementation - replaced by enhanced map matching version below
 
     // Check speed limit changes only when currentLinkIndex changes
     private func checkSpeedLimitChanges() {
@@ -1444,24 +1435,9 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
             // Mock response data based on your provided sample
             let mockRouteData: [String: Any] = [
-                "links": [
-                    [3084042, 1, [106.7008008157191, 10.728222624412965, 106.701535, 10.728238], 80, [[0, 60]]],
-                    [3097857, 1, [106.701535, 10.728238, 106.70235, 10.728245], 89, [[0, 70]]],
-                    [4659, 1, [106.70235, 10.728245, 106.703285, 10.728254], 102, [[0, 70]]],
-                    [3378, 1, [106.703285, 10.728254, 106.704197, 10.728271], 99, [[0,80]]],
-                    [3134099, 1, [106.704197, 10.728271, 106.705073, 10.728287], 95, [[0, 60]]],
-                    [3276, 1, [106.705073, 10.728287, 106.706819, 10.728338], 190, [[0, 60]]],
-                    [3379, 1, [106.706819, 10.728338, 106.708625, 10.728372], 197, [[0, 60]]],
-                    [3226, 1, [106.708625, 10.728372, 106.712313, 10.728441], 402, [[0, 60]]]
-                ],
-                "alerts": [
-                    [0, 167, 60, 18], [0, 211, NSNull(), 185], [1, 1, NSNull(), 253], [2, NSNull(), NSNull(), 271],
-                    [0, 169, NSNull(), 293], [0, 167, 60, 320], [0, 169, NSNull(), 478], [0, 167, 60, 489],
-                    [0, 68, NSNull(), 499], [0, 68, NSNull(), 582], [2, NSNull(), NSNull(), 655], [0, 167, 60, 679],
-                    [0, 169, NSNull(), 684], [2, NSNull(), NSNull(), 852], [0, 169, NSNull(), 873], [0, 167, 60, 885],
-                    [0, 55, NSNull(), 1151], [2, NSNull(), NSNull(), 1254]
-                ],
-                "offset": [3084042, 24, 1]
+                "links": [],
+                "alerts": [],
+                "offset": []
             ]
 
             print("✅ Mock route data received - Processing...")
@@ -1484,6 +1460,11 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             currentAlerts = alerts
             routeOffset = offset
 
+            // Debug log route links information
+            if let processedLinks = processedData["links"] as? [[String: Any]] {
+                debugLogRouteLinks(processedLinks, location: location)
+            }
+
             // Reset previous speed limit when new route data is received
             previousLinkSpeedLimit = nil
 
@@ -1496,7 +1477,7 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
                 print("⚠️ No links available from API, currentLinkIndex set to nil")
             }
 
-            // Find current link index based on location after setting initial value
+            // Find current link index based on location
             updateCurrentLinkIndex(for: location)
 
             // Read current speed limit immediately when new route data is received (if currentLinkIndex exists)
@@ -1551,13 +1532,19 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
     private func updateCurrentLinkIndex(for location: CLLocation) {
         guard let routeData = currentRouteData,
               let links = routeData["links"] as? [[String: Any]] else {
+            print("🔍 [DEBUG] updateCurrentLinkIndex - No route data available")
             return
         }
 
+        print("🔍 [DEBUG] updateCurrentLinkIndex - Starting update for location: (\(location.coordinate.latitude), \(location.coordinate.longitude))")
+
         let matchingResult = findBestRouteMatch(location: location, links: links)
 
+        // Lower confidence threshold for initial matching
+        let confidenceThreshold = currentLinkIndex == nil ? 0.3 : 0.5 // Lowered threshold if no current link
+
         if let newLinkIndex = matchingResult.linkIndex,
-           matchingResult.confidence > 0.7 { // Only update if confident
+           matchingResult.confidence > confidenceThreshold { // Lowered confidence requirement
 
             if newLinkIndex != currentLinkIndex {
                 print("🎯 Link index updated: \(currentLinkIndex ?? -1) → \(newLinkIndex)")
@@ -1577,7 +1564,14 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
                 if isSpeedAlertActive {
                     checkSpeedLimitChanges()
                 }
+            } else {
+                print("🔍 [DEBUG] Same link index maintained: \(newLinkIndex)")
             }
+        } else {
+            print("🔍 [DEBUG] No confident match found:")
+            print("  - Link index: \(matchingResult.linkIndex ?? -1)")
+            print("  - Confidence: \(String(format: "%.1f", matchingResult.confidence * 100))% (threshold: \(String(format: "%.1f", confidenceThreshold * 100))%)")
+            print("  - Distance: \(String(format: "%.1f", matchingResult.distanceToRoute))m")
         }
     }
 
@@ -1596,39 +1590,69 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         var bestMatch: RouteMatchingResult?
         var bestScore = Double.infinity
 
-        // Check current link first (higher priority)
+        print("🔍 [DEBUG] findBestRouteMatch - Starting search for location: (\(location.coordinate.latitude), \(location.coordinate.longitude))")
+        print("🔍 [DEBUG] Current link index: \(currentLinkIndex ?? -1), Total links: \(links.count)")
+
+        // Check current link first (higher priority) if exists
         if let currentIndex = currentLinkIndex,
            currentIndex < links.count {
             let currentLinkMatch = evaluateLinkMatch(location: location, link: links[currentIndex], linkIndex: currentIndex, isCurrentLink: true)
 
+            print("🔍 [DEBUG] Current link evaluation:")
+            print("  - Distance: \(String(format: "%.1f", currentLinkMatch.distanceToRoute))m")
+            print("  - Confidence: \(String(format: "%.1f", currentLinkMatch.confidence * 100))%")
+
             if currentLinkMatch.distanceToRoute <= routeBoundaryThreshold * 1.5 { // More lenient for current link
                 bestMatch = currentLinkMatch
                 bestScore = currentLinkMatch.distanceToRoute
+                print("🔍 [DEBUG] Current link accepted as candidate")
             }
         }
 
-        // Check adjacent links (look ahead and behind)
-        let searchRange = min(3, links.count) // Check up to 3 links ahead/behind
-        let startIndex = max(0, (currentLinkIndex ?? 0) - searchRange)
-        let endIndex = min(links.count - 1, (currentLinkIndex ?? 0) + searchRange)
+        // Determine search strategy
+        let searchAll = currentLinkIndex == nil || bestMatch == nil
+        let searchRange = searchAll ? links.count : min(5, links.count) // Search more links if no current link
+
+        let startIndex: Int
+        let endIndex: Int
+
+        if searchAll {
+            // Search all links if no current link or no good match
+            startIndex = 0
+            endIndex = links.count - 1
+            print("🔍 [DEBUG] Searching ALL links (no current link or poor match)")
+        } else {
+            // Search adjacent links only
+            startIndex = max(0, (currentLinkIndex ?? 0) - searchRange)
+            endIndex = min(links.count - 1, (currentLinkIndex ?? 0) + searchRange)
+            print("🔍 [DEBUG] Searching adjacent links: \(startIndex) to \(endIndex)")
+        }
 
         for i in startIndex...endIndex {
             if i == currentLinkIndex { continue } // Already checked
 
             let linkMatch = evaluateLinkMatch(location: location, link: links[i], linkIndex: i, isCurrentLink: false)
 
+            print("🔍 [DEBUG] Link \(i) evaluation:")
+            print("  - Distance: \(String(format: "%.1f", linkMatch.distanceToRoute))m")
+            print("  - Confidence: \(String(format: "%.1f", linkMatch.confidence * 100))%")
+
             // Scoring: distance + direction consistency + sequence penalty
-            let sequencePenalty = Double(abs(i - (currentLinkIndex ?? i))) * 10.0 // Prefer nearby links
+            let sequencePenalty = searchAll ? 0.0 : Double(abs(i - (currentLinkIndex ?? i))) * 5.0 // Reduced penalty
             let totalScore = linkMatch.distanceToRoute + sequencePenalty
 
-            if totalScore < bestScore && linkMatch.distanceToRoute <= routeBoundaryThreshold {
+            let isAcceptable = linkMatch.distanceToRoute <= routeBoundaryThreshold * 2.0 // More lenient threshold
+
+            if totalScore < bestScore && isAcceptable {
                 bestMatch = linkMatch
                 bestScore = totalScore
+                print("🔍 [DEBUG] Link \(i) accepted as new best candidate (score: \(String(format: "%.1f", totalScore)))")
             }
         }
 
-        // If no good match found, return default
+        // If still no good match found, return default
         if bestMatch == nil {
+            print("🔍 [DEBUG] No match found - returning nil result")
             return RouteMatchingResult(
                 isWithinRoute: false,
                 snappedLocation: nil,
@@ -1639,6 +1663,11 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             )
         }
 
+        print("🔍 [DEBUG] Best match found:")
+        print("  - Link index: \(bestMatch!.linkIndex ?? -1)")
+        print("  - Distance: \(String(format: "%.1f", bestMatch!.distanceToRoute))m")
+        print("  - Confidence: \(String(format: "%.1f", bestMatch!.confidence * 100))%")
+
         return bestMatch!
     }
 
@@ -1647,11 +1676,17 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
               let startLon = link["startLon"] as? Double,
               let endLat = link["endLat"] as? Double,
               let endLon = link["endLon"] as? Double else {
+            print("🔍 [DEBUG] evaluateLinkMatch - Invalid link coordinates for link \(linkIndex)")
             return RouteMatchingResult(isWithinRoute: false, snappedLocation: nil, linkIndex: nil, distanceToRoute: Double.infinity, progressOnLink: 0.0, confidence: 0.0)
         }
 
         let currentLat = location.coordinate.latitude
         let currentLon = location.coordinate.longitude
+
+        print("🔍 [DEBUG] evaluateLinkMatch - Link \(linkIndex):")
+        print("  - GPS: (\(currentLat), \(currentLon))")
+        print("  - Link Start: (\(startLat), \(startLon))")
+        print("  - Link End: (\(endLat), \(endLon))")
 
         // Calculate closest point on link segment (snap-to-route)
         let snappedPoint = snapToLineSegment(
@@ -1660,11 +1695,15 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             endLat: endLat, endLon: endLon
         )
 
+        print("  - Snapped point: (\(snappedPoint.latitude), \(snappedPoint.longitude))")
+
         // Calculate distance from GPS point to snapped point
         let distanceToRoute = calculateDistance(
             lat1: currentLat, lon1: currentLon,
             lat2: snappedPoint.latitude, lon2: snappedPoint.longitude
         )
+
+        print("  - Distance to route: \(String(format: "%.1f", distanceToRoute))m")
 
         // Calculate progress along the link (0.0 to 1.0)
         let progressOnLink = calculateProgressOnLink(
@@ -1672,6 +1711,8 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             startLat: startLat, startLon: startLon,
             endLat: endLat, endLon: endLon
         )
+
+        print("  - Progress on link: \(String(format: "%.2f", progressOnLink))")
 
         // Calculate confidence based on multiple factors
         let confidence = calculateMatchingConfidence(
@@ -1684,6 +1725,10 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         // Enhanced threshold based on movement direction and speed
         let dynamicThreshold = calculateDynamicThreshold(location: location, isCurrentLink: isCurrentLink)
         let isWithinRoute = distanceToRoute <= dynamicThreshold
+
+        print("  - Dynamic threshold: \(String(format: "%.1f", dynamicThreshold))m")
+        print("  - Is within route: \(isWithinRoute)")
+        print("  - Final confidence: \(String(format: "%.1f", confidence * 100))%")
 
         return RouteMatchingResult(
             isWithinRoute: isWithinRoute,
@@ -1743,28 +1788,52 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     private func calculateMatchingConfidence(distanceToRoute: Double, progressOnLink: Double,
                                            isCurrentLink: Bool, location: CLLocation) -> Double {
+        print("🔍 [DEBUG] calculateMatchingConfidence:")
+        print("  - Distance to route: \(String(format: "%.1f", distanceToRoute))m")
+        print("  - Is current link: \(isCurrentLink)")
+        print("  - GPS accuracy: \(String(format: "%.1f", location.horizontalAccuracy))m")
+
         var confidence = 1.0
 
-        // Distance factor (closer = higher confidence)
-        let distanceFactor = max(0.0, 1.0 - (distanceToRoute / (routeBoundaryThreshold * 2)))
+        // Distance factor (closer = higher confidence) - more generous scoring
+        let maxDistance = routeBoundaryThreshold * 3.0 // Allow for wider matching
+        let distanceFactor = max(0.1, 1.0 - (distanceToRoute / maxDistance)) // Minimum 10% confidence
         confidence *= distanceFactor
+        print("  - Distance factor: \(String(format: "%.2f", distanceFactor))")
 
-        // GPS accuracy factor
-        let accuracyFactor = location.horizontalAccuracy < 20 ? 1.0 : max(0.5, 20.0 / location.horizontalAccuracy)
+        // GPS accuracy factor - more lenient
+        let accuracyFactor: Double
+        if location.horizontalAccuracy < 10 {
+            accuracyFactor = 1.0
+        } else if location.horizontalAccuracy < 50 {
+            accuracyFactor = max(0.6, 1.0 - (location.horizontalAccuracy - 10) / 40)
+        } else {
+            accuracyFactor = 0.5 // Still give some confidence for poor GPS
+        }
         confidence *= accuracyFactor
+        print("  - Accuracy factor: \(String(format: "%.2f", accuracyFactor))")
 
         // Current link bonus
         if isCurrentLink {
-            confidence *= 1.2
+            confidence *= 1.3 // Increased bonus for current link
+            print("  - Current link bonus applied")
         }
 
         // Speed consistency (if moving, prefer links in direction of movement)
         if location.speed > 1.0 && location.course >= 0 { // Moving with valid course
-            // This could be enhanced with bearing comparison to link direction
-            confidence *= 1.1
+            confidence *= 1.15
+            print("  - Movement bonus applied")
         }
 
-        return max(0.0, min(1.0, confidence))
+        // Ensure minimum confidence for close matches
+        if distanceToRoute <= routeBoundaryThreshold {
+            confidence = max(confidence, 0.4) // Minimum 40% confidence for close matches
+        }
+
+        let finalConfidence = max(0.0, min(1.0, confidence))
+        print("  - Final confidence: \(String(format: "%.2f", finalConfidence))")
+
+        return finalConfidence
     }
 
     private func calculateDynamicThreshold(location: CLLocation, isCurrentLink: Bool) -> Double {
