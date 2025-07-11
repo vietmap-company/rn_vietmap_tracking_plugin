@@ -1401,6 +1401,19 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   )
 
   private fun findBestRouteMatch(location: Location, links: ReadableArray): RouteMatchingResult {
+    // Handle empty links gracefully
+    if (links.size() == 0) {
+      Log.d(NAME, "🔍 [DEBUG] findBestRouteMatch - No links available")
+      return RouteMatchingResult(
+        isWithinRoute = false,
+        snappedLocation = null,
+        linkIndex = null,
+        distanceToRoute = Double.MAX_VALUE,
+        progressOnLink = 0.0,
+        confidence = 0.0
+      )
+    }
+
     var bestMatch: RouteMatchingResult? = null
     var bestScore = Double.MAX_VALUE
 
@@ -1444,6 +1457,19 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       startIndex = maxOf(0, (currentLinkIndex ?: 0) - searchRange)
       endIndex = minOf(links.size() - 1, (currentLinkIndex ?: 0) + searchRange)
       Log.d(NAME, "🔍 [DEBUG] Searching adjacent links: $startIndex to $endIndex")
+    }
+
+    // Ensure valid range before using it
+    if (startIndex > endIndex || startIndex >= links.size() || endIndex < 0) {
+      Log.d(NAME, "🔍 [DEBUG] Invalid range: startIndex=$startIndex, endIndex=$endIndex, links.size=${links.size()}")
+      return bestMatch ?: RouteMatchingResult(
+        isWithinRoute = false,
+        snappedLocation = null,
+        linkIndex = null,
+        distanceToRoute = Double.MAX_VALUE,
+        progressOnLink = 0.0,
+        confidence = 0.0
+      )
     }
 
     for (i in startIndex..endIndex) {

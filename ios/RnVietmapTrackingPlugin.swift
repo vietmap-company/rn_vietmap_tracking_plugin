@@ -671,37 +671,6 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             print("❌ Failed to schedule location sync task: \(error)")
         }
     }
-
-    // Debug function to log route links information
-    private func debugLogRouteLinks(_ links: [[String: Any]], location: CLLocation) {
-        print("🔍 [DEBUG] Route Links Debug Information:")
-        print("  Current location: (\(location.coordinate.latitude), \(location.coordinate.longitude))")
-        print("  Total links: \(links.count)")
-
-        for (index, link) in links.enumerated() {
-            if let startLat = link["startLat"] as? Double,
-               let startLon = link["startLon"] as? Double,
-               let endLat = link["endLat"] as? Double,
-               let endLon = link["endLon"] as? Double {
-
-                let distance = distanceToLineSegment(
-                    pointLat: location.coordinate.latitude, pointLon: location.coordinate.longitude,
-                    startLat: startLat, startLon: startLon,
-                    endLat: endLat, endLon: endLon
-                )
-
-                print("  Link \(index): Start(\(startLat), \(startLon)) → End(\(endLat), \(endLon)), Distance: \(String(format: "%.1f", distance))m")
-
-                if let speedLimits = link["speedLimits"] as? [[Int]] {
-                    for speedLimit in speedLimits {
-                        if speedLimit.count >= 2 {
-                            print("    Speed Limit: \(speedLimit[1]) km/h")
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 // MARK: - CLLocationManagerDelegate
@@ -1460,11 +1429,6 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             currentAlerts = alerts
             routeOffset = offset
 
-            // Debug log route links information
-            if let processedLinks = processedData["links"] as? [[String: Any]] {
-                debugLogRouteLinks(processedLinks, location: location)
-            }
-
             // Reset previous speed limit when new route data is received
             previousLinkSpeedLimit = nil
 
@@ -1587,6 +1551,19 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
     }
 
     private func findBestRouteMatch(location: CLLocation, links: [[String: Any]]) -> RouteMatchingResult {
+        // Handle empty links gracefully
+        if links.isEmpty {
+            print("🔍 [DEBUG] findBestRouteMatch - No links available")
+            return RouteMatchingResult(
+                isWithinRoute: false,
+                snappedLocation: nil,
+                linkIndex: nil,
+                distanceToRoute: Double.infinity,
+                progressOnLink: 0.0,
+                confidence: 0.0
+            )
+        }
+
         var bestMatch: RouteMatchingResult?
         var bestScore = Double.infinity
 
@@ -1626,6 +1603,23 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             startIndex = max(0, (currentLinkIndex ?? 0) - searchRange)
             endIndex = min(links.count - 1, (currentLinkIndex ?? 0) + searchRange)
             print("🔍 [DEBUG] Searching adjacent links: \(startIndex) to \(endIndex)")
+        }
+
+        // Ensure valid range before using it
+        guard startIndex <= endIndex && startIndex < links.count && endIndex >= 0 else {
+            print("🔍 [DEBUG] Invalid range: startIndex=\(startIndex), endIndex=\(endIndex), links.count=\(links.count)")
+            if bestMatch != nil {
+                return bestMatch!
+            } else {
+                return RouteMatchingResult(
+                    isWithinRoute: false,
+                    snappedLocation: nil,
+                    linkIndex: nil,
+                    distanceToRoute: Double.infinity,
+                    progressOnLink: 0.0,
+                    confidence: 0.0
+                )
+            }
         }
 
         for i in startIndex...endIndex {

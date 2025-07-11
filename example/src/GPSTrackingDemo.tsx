@@ -310,6 +310,23 @@ const GPSTrackingDemo = () => {
         </View>
       )}
 
+      {/* Speed Alert Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🚨 Speed Alert</Text>
+        <View style={styles.switchRow}>
+          <Text style={styles.label}>Enable Speed Alert:</Text>
+          <Switch
+            value={isSpeedAlertEnabled}
+            onValueChange={handleSpeedAlertToggle}
+          />
+        </View>
+
+        <Text style={styles.label}>
+          Speed violations are announced using native speech synthesis.
+          No visual alerts are displayed.
+        </Text>
+      </View>
+
       {/* Configuration Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>⚙️ Configuration</Text>
@@ -459,23 +476,6 @@ const GPSTrackingDemo = () => {
         >
           <Text style={styles.buttonText}>🗑️ Clear History</Text>
         </TouchableOpacity>
-      </View>
-
-      {/* Speed Alert Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>🚨 Speed Alert</Text>
-        <View style={styles.switchRow}>
-          <Text style={styles.label}>Enable Speed Alert:</Text>
-          <Switch
-            value={isSpeedAlertEnabled}
-            onValueChange={handleSpeedAlertToggle}
-          />
-        </View>
-
-        <Text style={styles.label}>
-          Speed violations are announced using native speech synthesis.
-          No visual alerts are displayed.
-        </Text>
       </View>
 
       {/* Current Location Section */}
