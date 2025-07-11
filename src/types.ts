@@ -73,12 +73,5 @@ export interface SpeedViolationResult {
   alertInfo?: RouteAlert;
 }
 
-export interface SpeedAlertEvent {
-  currentSpeed: number;
-  speedLimit: number;
-  severity: 'warning' | 'critical';
-  excess: number;
-  timestamp: number;
-}
-
-export type SpeedAlertCallback = (event: SpeedAlertEvent) => void;
+// Speed alerts are now handled natively with speech synthesis
+// No need for JavaScript event types

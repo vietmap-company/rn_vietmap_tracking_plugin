@@ -29,7 +29,6 @@ import {
   type LocationData,
   type TrackingStatus,
   type LocationTrackingConfig,
-  type SpeedAlertEvent,
 } from 'rn_vietmap_tracking_plugin';
 
 const GPSTrackingDemo = () => {
@@ -39,9 +38,8 @@ const GPSTrackingDemo = () => {
   const [locationHistory, setLocationHistory] = useState<LocationData[]>([]);
   const [sessionStats, setSessionStats] = useState<any>(null);
 
-  // Speed Alert state
+  // Speed Alert state (native speech synthesis only - no event data to display)
   const [isSpeedAlertEnabled, setIsSpeedAlertEnabled] = useState(false);
-  const [lastSpeedAlert, setLastSpeedAlert] = useState<SpeedAlertEvent | null>(null);
 
   // Configuration state
   const [config, setConfig] = useState<LocationTrackingConfig>(TrackingPresets.GENERAL);
@@ -231,8 +229,7 @@ const GPSTrackingDemo = () => {
         const success = await turnOffAlert();
         if (success) {
           setIsSpeedAlertEnabled(false);
-          setLastSpeedAlert(null);
-          Alert.alert('🛑 Speed Alert', 'Speed alert turned off successfully');
+          Alert.alert('🛑 Speed Alert', 'Speed alert turned off successfully (speech alerts disabled)');
         } else {
           Alert.alert('❌ Error', 'Failed to turn off speed alert');
         }
@@ -477,19 +474,10 @@ const GPSTrackingDemo = () => {
           />
         </View>
 
-        {lastSpeedAlert && (
-          <View style={styles.alertInfo}>
-            <Text style={styles.alertText}>
-              <Text style={styles.bold}>Current Speed:</Text> {lastSpeedAlert.currentSpeed} km/h
-            </Text>
-            <Text style={styles.alertText}>
-              <Text style={styles.bold}>Speed Limit:</Text> {lastSpeedAlert.speedLimit} km/h
-            </Text>
-            <Text style={styles.alertText}>
-              <Text style={styles.bold}>Severity:</Text> {lastSpeedAlert.severity}
-            </Text>
-          </View>
-        )}
+        <Text style={styles.label}>
+          Speed violations are announced using native speech synthesis.
+          No visual alerts are displayed.
+        </Text>
       </View>
 
       {/* Current Location Section */}

@@ -4,8 +4,10 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
@@ -14,13 +16,22 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 import com.google.android.gms.location.*
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.OnCompleteListener
-import com.facebook.fbreact.specs.NativeRnVietmapTrackingPluginSpec
 import java.util.Timer
 import java.util.TimerTask
+import java.util.Locale
+import okhttp3.*
+import org.json.JSONObject
+import org.json.JSONArray
+import kotlin.math.*
 
 class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
-  NativeRnVietmapTrackingPluginSpec(reactContext) {
+  ReactContextBaseJavaModule(reactContext) {
+
+  override fun getName(): String {
+    return NAME
+  }
 
   private var fusedLocationClient: FusedLocationProviderClient? = null
   private var locationRequest: LocationRequest? = null
@@ -41,6 +52,11 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var pendingAlertPromise: Promise? = null
   private var isSpeedAlertActive = false
 
+  // MARK: - Text-to-Speech for Speed Alerts
+  private var textToSpeech: TextToSpeech? = null
+  private var lastSpeedAlertTime: Long = 0
+  private val speedAlertCooldown: Long = 5000 // 5 seconds cooldown between alerts
+
   // Route and Alert Data
   private var currentRouteData: ReadableMap? = null
   private var currentAlerts: ReadableArray? = null
@@ -48,31 +64,48 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
   // Route Boundary Detection & API Management
   private var currentLinkIndex: Int? = null
+  private var previousLinkSpeedLimit: Int? = null // Track previous link's speed limit
   private var routeBoundaryThreshold: Double = 50.0 // meters
   private var lastAPIRequestLocation: Location? = null
   private var apiRequestInProgress: Boolean = false
-  private var speedLimitAlerts: MutableMap<String, Any> = mutableMapOf()
   private var routeAPIEndpoint: String? = null
-
-  companion object {
-    const val NAME = "RnVietmapTrackingPlugin"
-    const val LOCATION_PERMISSION_REQUEST_CODE = 1001
-  }
 
   init {
     fusedLocationClient = LocationServices.getFusedLocationProviderClient(reactContext)
+
+    // Initialize Text-to-Speech
+    textToSpeech = TextToSpeech(reactContext) { status ->
+      if (status == TextToSpeech.SUCCESS) {
+        // Set language to Vietnamese (fallback to English if not available)
+        val result = textToSpeech?.setLanguage(Locale("vi", "VN"))
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+          Log.w(NAME, "Vietnamese language not supported, using English")
+          textToSpeech?.setLanguage(Locale.ENGLISH)
+        }
+        Log.d(NAME, "✅ Text-to-Speech initialized successfully")
+      } else {
+        Log.e(NAME, "❌ Text-to-Speech initialization failed")
+      }
+    }
   }
 
-  override fun getName(): String {
-    return NAME
+  override fun onCatalystInstanceDestroy() {
+    super.onCatalystInstanceDestroy()
+    // Clean up Text-to-Speech
+    textToSpeech?.stop()
+    textToSpeech?.shutdown()
+    textToSpeech = null
+    Log.d(NAME, "🔄 Text-to-Speech cleaned up")
   }
 
   // Example method
-  override fun multiply(a: Double, b: Double): Double {
+  @ReactMethod
+  fun multiply(a: Double, b: Double): Double {
     return a * b
   }
 
-  override fun getCurrentLocation(promise: Promise) {
+  @ReactMethod
+  fun getCurrentLocation(promise: Promise) {
     if (!hasLocationPermissions()) {
       promise.reject("PERMISSION_DENIED", "Location permissions are required")
       return
@@ -92,11 +125,13 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun isTrackingActive(): Boolean {
+  @ReactMethod
+  fun isTrackingActive(): Boolean {
     return isTracking
   }
 
-  override fun getTrackingStatus(promise: Promise) {
+  @ReactMethod
+  fun getTrackingStatus(promise: Promise) {
     val status = Arguments.createMap().apply {
       putBoolean("isTracking", isTracking)
       if (lastLocationUpdate > 0) {
@@ -107,7 +142,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     promise.resolve(status)
   }
 
-  override fun updateTrackingConfig(config: ReadableMap, promise: Promise) {
+  @ReactMethod
+  fun updateTrackingConfig(config: ReadableMap, promise: Promise) {
     if (!isTracking) {
       promise.reject("NOT_TRACKING", "Location tracking is not active")
       return
@@ -132,7 +168,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun requestLocationPermissions(promise: Promise) {
+  @ReactMethod
+  fun requestLocationPermissions(promise: Promise) {
     println("🔐 Requesting location permissions...")
 
     if (hasLocationPermissions()) {
@@ -198,7 +235,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun hasLocationPermissions(promise: Promise) {
+  @ReactMethod
+  fun hasLocationPermissions(promise: Promise) {
     promise.resolve(hasLocationPermissions())
   }
 
@@ -223,7 +261,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     return hasPermissions
   }
 
-  override fun requestAlwaysLocationPermissions(promise: Promise) {
+  @ReactMethod
+  fun requestAlwaysLocationPermissions(promise: Promise) {
     // On Android, "Always" permission is handled by ACCESS_BACKGROUND_LOCATION for Android 10+
     println("🔐 Requesting always location permissions...")
 
@@ -317,7 +356,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   // Enhanced tracking methods for background_location_2 strategy
-  override fun startTracking(backgroundMode: Boolean, intervalMs: Double, forceUpdateBackground: Boolean?, distanceFilter: Double?, promise: Promise) {
+  @ReactMethod
+  fun startTracking(backgroundMode: Boolean, intervalMs: Double, forceUpdateBackground: Boolean?, distanceFilter: Double?, promise: Promise) {
     val actualForceUpdate = forceUpdateBackground ?: false
     val actualDistanceFilter = distanceFilter ?: 10.0
     val actualIntervalMs = intervalMs.toLong()
@@ -348,7 +388,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
     try {
       // Configure location request based on force update mode
-      if (forceUpdateBackground) {
+      if (actualForceUpdate) {
         configureLocationRequestForForcedUpdates()
       } else {
         configureLocationRequestForContinuousUpdates()
@@ -357,7 +397,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       isTracking = true
       trackingStartTime = System.currentTimeMillis()
 
-      if (forceUpdateBackground) {
+      if (actualForceUpdate) {
         println("🔄 Starting forced location updates with timer")
         startLocationTimer()
       } else {
@@ -370,7 +410,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       }
 
       sendTrackingStatusUpdate()
-      val trackingMode = if (forceUpdateBackground) "forced timer" else "continuous updates"
+      val trackingMode = if (actualForceUpdate) "forced timer" else "continuous updates"
       promise.resolve("Enhanced tracking started with $trackingMode")
     } catch (e: Exception) {
       println("❌ Failed to start enhanced tracking: ${e.message}")
@@ -378,7 +418,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun stopTracking(promise: Promise) {
+  @ReactMethod
+  fun stopTracking(promise: Promise) {
     println("🛑 Stopping enhanced tracking")
 
     if (!isTracking) {
@@ -477,16 +518,21 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     println("📡 Location event sent to React Native (continuous updates)")
 
     // MARK: - Route Boundary Detection & API Management
-    // Update current link index based on location
-    updateCurrentLinkIndex(location)
+    // Only process if not already handled by speed alert callback
+    if (!isSpeedAlertActive) {
+      // Update current link index based on location
+      updateCurrentLinkIndex(location)
 
-    // Check if we need to request new route data from the server
-    if (shouldRequestNewRouteData(location)) {
-      requestRouteDataFromAPI(location)
+      // Check if we need to request new route data from the server
+      if (shouldRequestNewRouteData(location)) {
+        requestRouteDataFromAPI(location)
+      }
+
+      // Note: Speed limit checking is now only done when link index changes
+      // This prevents continuous speech alerts on every location update
+    } else {
+      println("🚨 Route boundary detection already handled by speed alert callback - skipping duplicate processing")
     }
-
-    // Check speed limits if we have route data
-    checkSpeedLimitsForCurrentLocation(location)
   }
 
   // Permission helper methods for enhanced tracking
@@ -612,26 +658,79 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     println("📡 Location event sent to React Native (forced mode)")
 
     // MARK: - Route Boundary Detection & API Management
-    // Update current link index based on location
-    updateCurrentLinkIndex(location)
+    // Only process if not already handled by speed alert callback
+    if (!isSpeedAlertActive) {
+      // Update current link index based on location
+      updateCurrentLinkIndex(location)
 
-    // Check if we need to request new route data from the server
-    if (shouldRequestNewRouteData(location)) {
-      requestRouteDataFromAPI(location)
+      // Check if we need to request new route data from the server
+      if (shouldRequestNewRouteData(location)) {
+        requestRouteDataFromAPI(location)
+      }
+
+      // Note: Speed limit checking is now only done when link index changes
+      // This prevents continuous speech alerts on every location update
+    } else {
+      println("🚨 Route boundary detection already handled by speed alert callback - skipping duplicate processing")
     }
-
-    // Check speed limits if we have route data
-    checkSpeedLimitsForCurrentLocation(location)
   }
 
   // MARK: - Speed Alert Methods
 
-  override fun multiply(a: Double, b: Double): Double {
-    return a * b
+  // MARK: - Text-to-Speech for Speed Alerts
+
+  private fun speakSpeedLimitAnnouncement(speedLimit: Int) {
+    // Check cooldown to avoid too frequent announcements
+    val currentTime = System.currentTimeMillis()
+    if (currentTime - lastSpeedAlertTime < speedAlertCooldown) {
+      return // Skip if within cooldown period
+    }
+
+    lastSpeedAlertTime = currentTime
+
+    // Stop any current speech
+    textToSpeech?.stop()
+
+    // Create speed limit announcement message in Vietnamese
+    val message = "Giới hạn tốc độ $speedLimit ki-lô-mét trên giờ"
+
+    // Configure speech parameters for informational announcements
+    textToSpeech?.setSpeechRate(0.6f) // Slower speech rate for clarity
+    textToSpeech?.setPitch(1.0f) // Normal pitch for informational announcements
+
+    Log.d(NAME, "🔊 Speaking speed limit announcement: $message")
+    textToSpeech?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "SPEED_LIMIT_INFO")
+  }
+
+  private fun speakSpeedAlert(currentSpeed: Double, speedLimit: Int, severity: String) {
+    // Check cooldown to avoid too frequent alerts
+    val currentTime = System.currentTimeMillis()
+    if (currentTime - lastSpeedAlertTime < speedAlertCooldown) {
+      return // Skip if within cooldown period
+    }
+
+    lastSpeedAlertTime = currentTime
+
+    // Stop any current speech
+    textToSpeech?.stop()
+
+    // Create speech message in Vietnamese
+    val speedText = String.format("%.0f", currentSpeed)
+    val message = "Cảnh báo tốc độ! Tốc độ hiện tại $speedText km/h, vượt giới hạn $speedLimit km/h"
+
+    // Configure speech parameters based on severity
+    val speechRate = if (severity == "critical") 0.8f else 0.6f // Slower for critical
+    val pitch = if (severity == "critical") 1.2f else 1.0f // Higher pitch for critical
+
+    textToSpeech?.setSpeechRate(speechRate)
+    textToSpeech?.setPitch(pitch)
+
+    Log.d(NAME, "🔊 Speaking speed alert: $message")
+    textToSpeech?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "SPEED_ALERT")
   }
 
   @ReactMethod
-  override fun turnOnAlert(promise: Promise) {
+  fun turnOnAlert(promise: Promise) {
     Log.d(NAME, "🚨 Turning on speed alert")
 
     // Check if location permissions are granted
@@ -791,7 +890,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
           Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
       ) {
-        fusedLocationClient.requestLocationUpdates(
+        fusedLocationClient?.requestLocationUpdates(
           locationRequest,
           speedAlertLocationCallback,
           Looper.getMainLooper()
@@ -813,7 +912,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     try {
       // Only stop if we're not doing regular tracking
       if (!isTracking) {
-        fusedLocationClient.removeLocationUpdates(speedAlertLocationCallback)
+        fusedLocationClient?.removeLocationUpdates(speedAlertLocationCallback)
         Log.d(NAME, "✅ Speed alert location monitoring stopped")
       } else {
         Log.d(NAME, "ℹ️ Regular tracking is active, keeping location monitoring")
@@ -836,6 +935,20 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         Log.d(NAME, "  🧭 Bearing: ${location.bearing}°")
         Log.d(NAME, "  ⏰ Time: ${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(location.time))}")
         Log.d(NAME, "  🌍 Altitude: ${location.altitude}m")
+
+        // Process route boundary detection for speed alert mode
+        Log.d(NAME, "🚨 [SPEED ALERT] Processing route boundary detection...")
+
+        // Update current link index based on location
+        updateCurrentLinkIndex(location)
+
+        // Check if we need to request new route data from the server
+        if (shouldRequestNewRouteData(location)) {
+          requestRouteDataFromAPI(location)
+        }
+
+        // Note: Speed limit checking is now only done when new route data is received
+        // This prevents continuous speech alerts on every location update
       }
     }
 
@@ -847,47 +960,13 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  override fun turnOffAlert(promise: Promise) {
+  fun turnOffAlert(promise: Promise) {
     Log.d(NAME, "🛑 Turning off speed alert")
     stopSpeedAlertLocationMonitoring()
     promise.resolve(true)
   }
 
   // MARK: - Route and Alert Processing Methods
-
-  @ReactMethod
-  fun processRouteData(routeJson: ReadableMap, promise: Promise) {
-    Log.d(NAME, "🗺️ Processing route data natively")
-
-    try {
-      val links = routeJson.getArray("links")
-      val alerts = routeJson.getArray("alerts")
-      val offset = routeJson.getArray("offset")
-
-      if (links == null || alerts == null || offset == null) {
-        Log.e(NAME, "❌ Invalid route data format")
-        promise.reject("INVALID_DATA", "Invalid route data format")
-        return
-      }
-
-      // Process and store route data
-      val processedData = processRouteLinks(links, alerts, offset)
-
-      // Store for later use
-      currentRouteData = processedData
-      currentAlerts = alerts
-      routeOffset = offset
-
-      Log.d(NAME, "✅ Route data processed successfully")
-      Log.d(NAME, "📊 Processed ${links.size()} links and ${alerts.size()} alerts")
-
-      promise.resolve(processedData)
-    } catch (e: Exception) {
-      Log.e(NAME, "❌ Error processing route data: ${e.message}")
-      promise.reject("PROCESSING_ERROR", "Error processing route data: ${e.message}")
-    }
-  }
-
   private fun processRouteLinks(links: ReadableArray, alerts: ReadableArray, offset: ReadableArray): WritableMap {
     val processedLinks = Arguments.createArray()
     val processedAlerts = Arguments.createArray()
@@ -1064,135 +1143,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     return relevantAlerts
   }
 
-  @ReactMethod
-  fun checkSpeedViolation(currentSpeed: Double, promise: Promise) {
-    try {
-      fusedLocationClient?.lastLocation?.addOnCompleteListener { task ->
-        if (!task.isSuccessful || task.result == null) {
-          promise.reject("NO_LOCATION", "Current location not available")
-          return@addOnCompleteListener
-        }
-
-        val location = task.result
-
-        // Find current position on route and check speed limits
-        findNearestAlertInternal(location.latitude, location.longitude) { result ->
-          try {
-            if (result != null) {
-              val alerts = result.getArray("alerts")
-              if (alerts != null) {
-                for (i in 0 until alerts.size()) {
-                  val alert = alerts.getMap(i)
-                  if (alert != null && alert.hasKey("speedLimit") && !alert.isNull("speedLimit")) {
-                    val speedLimit = alert.getInt("speedLimit")
-                    if (speedLimit > 0) {
-                      val speedKmh = currentSpeed * 3.6 // Convert m/s to km/h
-                      val violation = speedKmh > speedLimit
-
-                      val speedResult = Arguments.createMap().apply {
-                        putBoolean("isViolation", violation)
-                        putDouble("currentSpeed", speedKmh)
-                        putInt("speedLimit", speedLimit)
-                        putDouble("excess", kotlin.math.max(0.0, speedKmh - speedLimit))
-                        putMap("alertInfo", alert)
-                      }
-
-                      // Send speed alert event if violation detected
-                      if (violation) {
-                        sendSpeedAlertEvent(speedResult)
-                      }
-
-                      promise.resolve(speedResult)
-                      return@findNearestAlertInternal
-                    }
-                  }
-                }
-              }
-            }
-
-            // No speed limit found
-            val result = Arguments.createMap().apply {
-              putBoolean("isViolation", false)
-              putDouble("currentSpeed", currentSpeed * 3.6)
-              putNull("speedLimit")
-              putDouble("excess", 0.0)
-            }
-            promise.resolve(result)
-          } catch (e: Exception) {
-            promise.reject("SPEED_CHECK_ERROR", "Error checking speed violation: ${e.message}")
-          }
-        }
-      }
-    } catch (e: Exception) {
-      Log.e(NAME, "❌ Error in checkSpeedViolation: ${e.message}")
-      promise.reject("SPEED_CHECK_ERROR", "Error checking speed violation: ${e.message}")
-    }
-  }
-
-  private fun findNearestAlertInternal(latitude: Double, longitude: Double, callback: (WritableMap?) -> Unit) {
-    if (currentRouteData == null || currentAlerts == null) {
-      callback(null)
-      return
-    }
-
-    try {
-      val links = currentRouteData!!.getArray("links")
-      if (links == null) {
-        callback(null)
-        return
-      }
-
-      // Find nearest link based on current location
-      var nearestLinkIndex: Int? = null
-      var minDistance = Double.MAX_VALUE
-
-      for (i in 0 until links.size()) {
-        val link = links.getMap(i)
-        if (link != null) {
-          val startLat = link.getDouble("startLat")
-          val startLon = link.getDouble("startLon")
-          val endLat = link.getDouble("endLat")
-          val endLon = link.getDouble("endLon")
-
-          // Calculate distance to link segment
-          val distance = distanceToLineSegment(
-            latitude, longitude,
-            startLat, startLon,
-            endLat, endLon
-          )
-
-          if (distance < minDistance) {
-            minDistance = distance
-            nearestLinkIndex = i
-          }
-        }
-      }
-
-      // Find alerts for the nearest link
-      if (nearestLinkIndex != null) {
-        val relevantAlerts = findAlertsForLink(nearestLinkIndex, currentAlerts!!)
-
-        val result = Arguments.createMap().apply {
-          putInt("nearestLinkIndex", nearestLinkIndex)
-          putDouble("distanceToLink", minDistance)
-          putArray("alerts", relevantAlerts)
-        }
-
-        callback(result)
-      } else {
-        callback(null)
-      }
-    } catch (e: Exception) {
-      Log.e(NAME, "❌ Error finding nearest alert: ${e.message}")
-      callback(null)
-    }
-  }
-
-  private fun sendSpeedAlertEvent(alertData: WritableMap) {
-    Log.d(NAME, "🚨 Speed violation detected!")
-    sendEvent("onSpeedAlert", alertData)
-  }
-
   private fun sendEvent(eventName: String, data: Any?) {
     reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
@@ -1218,24 +1168,11 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private fun isLocationWithinCurrentRoute(location: Location): Boolean {
     val routeData = currentRouteData ?: return false
     val links = routeData.getArray("links") ?: return false
-    val currentIndex = currentLinkIndex ?: return false
 
-    if (currentIndex >= links.size()) return false
+    // Enhanced route matching with map-matching algorithm
+    val matchingResult = findBestRouteMatch(location, links)
 
-    val currentLink = links.getMap(currentIndex) ?: return false
-
-    // Check distance to current link
-    val startLat = currentLink.getDouble("startLat")
-    val startLon = currentLink.getDouble("startLon")
-    val endLat = currentLink.getDouble("endLat")
-    val endLon = currentLink.getDouble("endLon")
-
-    val distance = distanceToLineSegment(
-      location.latitude, location.longitude,
-      startLat, startLon, endLat, endLon
-    )
-
-    return distance <= routeBoundaryThreshold
+    return matchingResult.isWithinRoute
   }
 
   private fun shouldRequestNewRouteData(location: Location): Boolean {
@@ -1371,11 +1308,20 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       currentAlerts = alertsReadable
       routeOffset = offsetReadable
 
-      // Update current link index
-      updateCurrentLinkIndex(location)
+      // Reset previous speed limit when new route data is received
+      previousLinkSpeedLimit = null
 
-      // Extract speed limit alerts
-      extractSpeedLimitAlerts()
+      // Set initial currentLinkIndex to first link when new route data is received from API
+      if (linksReadable.size() > 0) {
+        currentLinkIndex = 0
+        Log.d(NAME, "🎯 Initial currentLinkIndex set to: 0 (first link from API)")
+      } else {
+        currentLinkIndex = null
+        Log.d(NAME, "⚠️ No links available from API, currentLinkIndex set to null")
+      }
+
+      // Find current link index based on location after setting initial value
+      updateCurrentLinkIndex(location)
 
       Log.d(NAME, "✅ Route data updated from API - Links: ${linksReadable.size()}, Alerts: ${alertsReadable.size()}")
 
@@ -1388,57 +1334,31 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     val routeData = currentRouteData ?: return
     val links = routeData.getArray("links") ?: return
 
-    var nearestIndex: Int? = null
-    var minDistance = Double.MAX_VALUE
+    val matchingResult = findBestRouteMatch(location, links)
 
-    for (i in 0 until links.size()) {
-      val link = links.getMap(i) ?: continue
+    if (matchingResult.linkIndex != null && matchingResult.confidence > 0.7) { // Only update if confident
+      val newLinkIndex = matchingResult.linkIndex
 
-      val startLat = link.getDouble("startLat")
-      val startLon = link.getDouble("startLon")
-      val endLat = link.getDouble("endLat")
-      val endLon = link.getDouble("endLon")
+      if (newLinkIndex != currentLinkIndex) {
+        Log.d(NAME, "🎯 Link index updated: ${currentLinkIndex ?: -1} → $newLinkIndex")
+        Log.d(NAME, "📍 Snap distance: ${"%.1f".format(matchingResult.distanceToRoute)}m")
+        Log.d(NAME, "📊 Progress on link: ${"%.1f".format(matchingResult.progressOnLink * 100)}%")
+        Log.d(NAME, "🎯 Confidence: ${"%.1f".format(matchingResult.confidence * 100)}%")
 
-      val distance = distanceToLineSegment(
-        location.latitude, location.longitude,
-        startLat, startLon, endLat, endLon
-      )
+        currentLinkIndex = newLinkIndex
 
-      if (distance < minDistance) {
-        minDistance = distance
-        nearestIndex = i
-      }
-    }
+        // Store snapped location for better tracking
+        matchingResult.snappedLocation?.let { snapped ->
+          Log.d(NAME, "🧭 GPS: (${location.latitude}, ${location.longitude})")
+          Log.d(NAME, "📍 Snapped: (${snapped.latitude}, ${snapped.longitude})")
+        }
 
-    nearestIndex?.let { index ->
-      currentLinkIndex = index
-      Log.d(NAME, "🎯 Current link index updated to: $index")
-    }
-  }
-
-  private fun extractSpeedLimitAlerts() {
-    val alerts = currentAlerts ?: return
-
-    speedLimitAlerts.clear()
-
-    for (i in 0 until alerts.size()) {
-      val alert = alerts.getArray(i) ?: continue
-      if (alert.size() >= 4) {
-        val type = alert.getInt(0)
-        if (type == 0) { // Speed limit alert type
-          val speedLimit = if (!alert.isNull(2)) alert.getInt(2) else 0
-          if (speedLimit > 0) {
-            speedLimitAlerts["alert_$i"] = mapOf(
-              "type" to type,
-              "speedLimit" to speedLimit,
-              "distance" to alert.getInt(3)
-            )
-          }
+        // Check speed limits when link changes (only for speed alert mode)
+        if (isSpeedAlertActive) {
+          checkSpeedLimitsForCurrentLocation(location)
         }
       }
     }
-
-    Log.d(NAME, "🚨 Extracted ${speedLimitAlerts.size} speed limit alerts")
   }
 
   private fun checkSpeedLimitsForCurrentLocation(location: Location) {
@@ -1456,30 +1376,276 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       for (i in 0 until limits.size()) {
         val speedLimitData = limits.getArray(i) ?: continue
         if (speedLimitData.size() >= 2) {
-          val speedLimit = speedLimitData.getInt(1) // Speed limit value
+          val currentSpeedLimit = speedLimitData.getInt(1) // Speed limit value
 
-          // Convert current speed from m/s to km/h
-          val currentSpeedKmh = location.speed * 3.6
+          // Only announce if speed limit is different from previous link
+          if (currentSpeedLimit != previousLinkSpeedLimit && currentSpeedLimit > 0) {
+            Log.d(NAME, "🚨 SPEED LIMIT CHANGED: Previous: ${previousLinkSpeedLimit ?: 0} → Current: $currentSpeedLimit km/h")
 
-          if (currentSpeedKmh > speedLimit && speedLimit > 0) {
-            // Speed violation detected
-            val violation = Arguments.createMap().apply {
-              putDouble("currentSpeed", currentSpeedKmh)
-              putInt("speedLimit", speedLimit)
-              putDouble("excess", currentSpeedKmh - speedLimit)
-              putString("severity", if (currentSpeedKmh > speedLimit + 10) "critical" else "warning")
-              putDouble("timestamp", System.currentTimeMillis().toDouble())
-              putMap("location", Arguments.createMap().apply {
-                putDouble("latitude", location.latitude)
-                putDouble("longitude", location.longitude)
-              })
-            }
+            // Announce the new speed limit (not violation, just information)
+            speakSpeedLimitAnnouncement(currentSpeedLimit)
 
-            Log.d(NAME, "🚨 SPEED VIOLATION: $currentSpeedKmh km/h > $speedLimit km/h")
-            sendSpeedAlertEvent(violation)
+            // Update previous speed limit
+            previousLinkSpeedLimit = currentSpeedLimit
+          }
+
+          // Break after first speed limit (assuming one speed limit per link)
+          break
+        }
+      }
+    } ?: run {
+      // No speed limit for current link
+      if (previousLinkSpeedLimit != null) {
+        Log.d(NAME, "🚨 SPEED LIMIT REMOVED: Previous: ${previousLinkSpeedLimit ?: 0} → Current: No limit")
+        previousLinkSpeedLimit = null
+        // Optionally announce that speed limit has been removed
+        // speakSpeedLimitRemoved()
+      }
+    }
+  }
+
+  // MARK: - Enhanced Map Matching for Route Following
+
+  data class SnappedLocation(
+    val latitude: Double,
+    val longitude: Double
+  )
+
+  data class RouteMatchingResult(
+    val isWithinRoute: Boolean,
+    val snappedLocation: SnappedLocation?,
+    val linkIndex: Int?,
+    val distanceToRoute: Double,
+    val progressOnLink: Double, // 0.0 to 1.0
+    val confidence: Double      // 0.0 to 1.0
+  )
+
+  private fun findBestRouteMatch(location: Location, links: ReadableArray): RouteMatchingResult {
+    var bestMatch: RouteMatchingResult? = null
+    var bestScore = Double.MAX_VALUE
+
+    // Check current link first (higher priority)
+    currentLinkIndex?.let { currentIndex ->
+      if (currentIndex < links.size()) {
+        val currentLink = links.getMap(currentIndex)
+        if (currentLink != null) {
+          val currentLinkMatch = evaluateLinkMatch(location, currentLink, currentIndex, true)
+
+          if (currentLinkMatch.distanceToRoute <= routeBoundaryThreshold * 1.5) { // More lenient for current link
+            bestMatch = currentLinkMatch
+            bestScore = currentLinkMatch.distanceToRoute
           }
         }
       }
     }
+
+    // Check adjacent links (look ahead and behind)
+    val searchRange = minOf(3, links.size()) // Check up to 3 links ahead/behind
+    val currentIdx = currentLinkIndex ?: 0
+    val startIndex = maxOf(0, currentIdx - searchRange)
+    val endIndex = minOf(links.size() - 1, currentIdx + searchRange)
+
+    for (i in startIndex..endIndex) {
+      if (i == currentLinkIndex) continue // Already checked
+
+      val link = links.getMap(i) ?: continue
+      val linkMatch = evaluateLinkMatch(location, link, i, false)
+
+      // Scoring: distance + direction consistency + sequence penalty
+      val sequencePenalty = kotlin.math.abs(i - currentIdx) * 10.0 // Prefer nearby links
+      val totalScore = linkMatch.distanceToRoute + sequencePenalty
+
+      if (totalScore < bestScore && linkMatch.distanceToRoute <= routeBoundaryThreshold) {
+        bestMatch = linkMatch
+        bestScore = totalScore
+      }
+    }
+
+    // If no good match found, return default
+    return bestMatch ?: RouteMatchingResult(
+      isWithinRoute = false,
+      snappedLocation = null,
+      linkIndex = null,
+      distanceToRoute = Double.MAX_VALUE,
+      progressOnLink = 0.0,
+      confidence = 0.0
+    )
+  }
+
+  private fun evaluateLinkMatch(location: Location, link: ReadableMap, linkIndex: Int, isCurrentLink: Boolean): RouteMatchingResult {
+    val startLat = link.getDouble("startLat")
+    val startLon = link.getDouble("startLon")
+    val endLat = link.getDouble("endLat")
+    val endLon = link.getDouble("endLon")
+
+    val currentLat = location.latitude
+    val currentLon = location.longitude
+
+    // Calculate closest point on link segment (snap-to-route)
+    val snappedPoint = snapToLineSegment(
+      currentLat, currentLon,
+      startLat, startLon,
+      endLat, endLon
+    )
+
+    // Calculate distance from GPS point to snapped point
+    val distanceToRoute = calculateDistance(
+      currentLat, currentLon,
+      snappedPoint.latitude, snappedPoint.longitude
+    )
+
+    // Calculate progress along the link (0.0 to 1.0)
+    val progressOnLink = calculateProgressOnLink(
+      snappedPoint.latitude, snappedPoint.longitude,
+      startLat, startLon,
+      endLat, endLon
+    )
+
+    // Calculate confidence based on multiple factors
+    val confidence = calculateMatchingConfidence(
+      distanceToRoute,
+      progressOnLink,
+      isCurrentLink,
+      location
+    )
+
+    // Enhanced threshold based on movement direction and speed
+    val dynamicThreshold = calculateDynamicThreshold(location, isCurrentLink)
+    val isWithinRoute = distanceToRoute <= dynamicThreshold
+
+    return RouteMatchingResult(
+      isWithinRoute = isWithinRoute,
+      snappedLocation = snappedPoint,
+      linkIndex = linkIndex,
+      distanceToRoute = distanceToRoute,
+      progressOnLink = progressOnLink,
+      confidence = confidence
+    )
+  }
+
+  private fun snapToLineSegment(
+    pointLat: Double, pointLon: Double,
+    startLat: Double, startLon: Double,
+    endLat: Double, endLon: Double
+  ): SnappedLocation {
+
+    // Vector from start to end of segment
+    val segmentLat = endLat - startLat
+    val segmentLon = endLon - startLon
+
+    // Vector from start to point
+    val pointLatRel = pointLat - startLat
+    val pointLonRel = pointLon - startLon
+
+    // Calculate parameter t for closest point on line segment
+    val segmentLengthSquared = segmentLat * segmentLat + segmentLon * segmentLon
+
+    if (segmentLengthSquared == 0.0) {
+      // Degenerate segment (start == end)
+      return SnappedLocation(startLat, startLon)
+    }
+
+    // Project point onto line segment
+    val t = (pointLatRel * segmentLat + pointLonRel * segmentLon) / segmentLengthSquared
+
+    // Clamp t to [0, 1] to stay within segment
+    val clampedT = maxOf(0.0, minOf(1.0, t))
+
+    // Calculate snapped coordinates
+    val snappedLat = startLat + clampedT * segmentLat
+    val snappedLon = startLon + clampedT * segmentLon
+
+    return SnappedLocation(snappedLat, snappedLon)
+  }
+
+  private fun calculateProgressOnLink(
+    snappedLat: Double, snappedLon: Double,
+    startLat: Double, startLon: Double,
+    endLat: Double, endLon: Double
+  ): Double {
+
+    val totalDistance = calculateDistance(startLat, startLon, endLat, endLon)
+
+    if (totalDistance == 0.0) return 0.0
+
+    val progressDistance = calculateDistance(startLat, startLon, snappedLat, snappedLon)
+
+    return minOf(1.0, progressDistance / totalDistance)
+  }
+
+  private fun calculateMatchingConfidence(
+    distanceToRoute: Double,
+    progressOnLink: Double,
+    isCurrentLink: Boolean,
+    location: Location
+  ): Double {
+    var confidence = 1.0
+
+    // Distance factor (closer = higher confidence)
+    val distanceFactor = maxOf(0.0, 1.0 - (distanceToRoute / (routeBoundaryThreshold * 2)))
+    confidence *= distanceFactor
+
+    // GPS accuracy factor
+    val accuracyFactor = if (location.accuracy < 20) 1.0 else maxOf(0.5, 20.0 / location.accuracy)
+    confidence *= accuracyFactor
+
+    // Current link bonus
+    if (isCurrentLink) {
+      confidence *= 1.2
+    }
+
+    // Speed consistency (if moving, prefer links in direction of movement)
+    if (location.speed > 1.0 && location.bearing >= 0) { // Moving with valid bearing
+      // This could be enhanced with bearing comparison to link direction
+      confidence *= 1.1
+    }
+
+    return maxOf(0.0, minOf(1.0, confidence))
+  }
+
+  private fun calculateDynamicThreshold(location: Location, isCurrentLink: Boolean): Double {
+    var threshold = routeBoundaryThreshold
+
+    // Increase threshold based on GPS accuracy
+    if (location.accuracy > 10) {
+      threshold += location.accuracy * 0.5
+    }
+
+    // Increase threshold for current link (more lenient)
+    if (isCurrentLink) {
+      threshold *= 1.5
+    }
+
+    // Increase threshold based on speed (faster = more GPS drift)
+    if (location.speed > 10) { // > 36 km/h
+      val speedFactor = 1.0 + (location.speed - 10) * 0.1
+      threshold *= speedFactor
+    }
+
+    // Cap maximum threshold
+    return minOf(threshold, 150.0) // Max 150m threshold
+  }
+
+  private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    // Haversine formula for more accurate distance calculation
+    val R = 6371000.0 // Earth radius in meters
+
+    val lat1Rad = Math.toRadians(lat1)
+    val lat2Rad = Math.toRadians(lat2)
+    val deltaLatRad = Math.toRadians(lat2 - lat1)
+    val deltaLonRad = Math.toRadians(lon2 - lon1)
+
+    val a = kotlin.math.sin(deltaLatRad / 2) * kotlin.math.sin(deltaLatRad / 2) +
+            kotlin.math.cos(lat1Rad) * kotlin.math.cos(lat2Rad) *
+            kotlin.math.sin(deltaLonRad / 2) * kotlin.math.sin(deltaLonRad / 2)
+
+    val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+
+    return R * c
+  }
+
+  companion object {
+    const val NAME = "RnVietmapTrackingPlugin"
+    const val LOCATION_PERMISSION_REQUEST_CODE = 1001
   }
 }

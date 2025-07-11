@@ -3,6 +3,7 @@ import CoreLocation
 import React
 import UIKit
 import BackgroundTasks // Add for iOS 13+ background task scheduling
+import AVFoundation // Add for speech synthesis
 
 @objc(RnVietmapTrackingPlugin)
 class RnVietmapTrackingPlugin: RCTEventEmitter {
@@ -29,6 +30,11 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     private var pendingAlertRejecter: RCTPromiseRejectBlock?
     private var isSpeedAlertActive: Bool = false
 
+    // MARK: - Speech Synthesis for Speed Alerts
+    private var speechSynthesizer: AVSpeechSynthesizer!
+    private var lastSpeedAlertTime: TimeInterval = 0
+    private let speedAlertCooldown: TimeInterval = 5.0 // 5 seconds cooldown between alerts
+
     // MARK: - Route and Alert Data Structures
     private var currentRouteData: [String: Any]?
     private var currentAlerts: [[Any]]?
@@ -36,10 +42,10 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
     // MARK: - Route Boundary Detection & API Management
     private var currentLinkIndex: Int?
+    private var previousLinkSpeedLimit: Int? // Track previous link's speed limit
     private var routeBoundaryThreshold: Double = 50.0 // meters
     private var lastAPIRequestLocation: CLLocation?
     private var apiRequestInProgress: Bool = false
-    private var speedLimitAlerts: [String: Any] = [:]
     private var routeAPIEndpoint: String?
 
     // Callback for route API updates
@@ -54,6 +60,9 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         lastLocationUpdate = 0
         intervalMs = 5000
         backgroundMode = false
+
+        // Initialize Speech Synthesizer
+        speechSynthesizer = AVSpeechSynthesizer()
 
         // Configure location manager for better battery life
         locationManager.pausesLocationUpdatesAutomatically = false
@@ -94,8 +103,8 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             "onLocationUpdate",
             "onTrackingStatusChanged",
             "onLocationError",
-            "onPermissionChanged",
-            "onSpeedAlert"
+            "onPermissionChanged"
+            // onSpeedAlert removed - handled natively with speech
         ]
     }
 
@@ -678,6 +687,20 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             print("  🧭 Bearing: \(location.course)°")
             print("  ⏰ Time: \(DateFormatter.localizedString(from: location.timestamp, dateStyle: .none, timeStyle: .medium))")
             print("  🌍 Altitude: \(location.altitude)m")
+
+            // Process route boundary detection for speed alert mode
+            print("🚨 [SPEED ALERT] Processing route boundary detection...")
+
+            // Update current link index based on location
+            updateCurrentLinkIndex(for: location)
+
+            // Check if we need to request new route data from the server
+            if shouldRequestNewRouteData(for: location) {
+                requestRouteDataFromAPI(for: location)
+            }
+
+            // Note: Speed limit checking is now only done when new route data is received
+            // This prevents continuous speech alerts on every location update
         }
 
         if forceUpdateBackground {
@@ -726,17 +749,21 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
             print("📡 Location event sent to React Native (continuous updates)")
         }        // MARK: - Route Boundary Detection & API Management
+        // Only process if not already handled by speed alert above
+        if !isSpeedAlertActive {
+            // Update current link index based on location
+            updateCurrentLinkIndex(for: location)
 
-        // Update current link index based on location
-        updateCurrentLinkIndex(for: location)
+            // Check if we need to request new route data from the server
+            if shouldRequestNewRouteData(for: location) {
+                requestRouteDataFromAPI(for: location)
+            }
 
-        // Check if we need to request new route data from the server
-        if shouldRequestNewRouteData(for: location) {
-            requestRouteDataFromAPI(for: location)
+            // Note: Speed limit checking removed from regular tracking
+            // Speed alerts are now only triggered when new route data is received
+        } else {
+            print("🚨 Route boundary detection already handled by speed alert - skipping duplicate processing")
         }
-
-        // Check speed limits if we have route data
-        checkSpeedLimitsForCurrentLocation(location)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -831,6 +858,35 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
     }
 
     // MARK: - Speed Alert Methods
+
+    // MARK: - Speech Synthesis for Speed Alerts
+
+    private func speakSpeedLimitAnnouncement(speedLimit: Int) {
+        // Check cooldown to avoid too frequent announcements
+        let currentTime = Date().timeIntervalSince1970
+        if currentTime - lastSpeedAlertTime < speedAlertCooldown {
+            return // Skip if within cooldown period
+        }
+
+        lastSpeedAlertTime = currentTime
+
+        // Stop any current speech
+        if speechSynthesizer.isSpeaking {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+
+        // Create speed limit announcement message
+        let message = "Giới hạn tốc độ \(speedLimit) ki-lô-mét trên giờ"
+
+        let utterance = AVSpeechUtterance(string: message)
+        utterance.voice = AVSpeechSynthesisVoice(language: "vi-VN") ?? AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5 // Slower speech rate for clarity
+        utterance.volume = 1.0
+        utterance.pitchMultiplier = 1.0 // Normal pitch for informational announcements
+
+        print("🔊 Speaking speed limit announcement: \(message)")
+        speechSynthesizer.speak(utterance)
+    }
 
     @objc(turnOnAlert:rejecter:)
     func turnOnAlert(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
@@ -963,32 +1019,6 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
     }
 
     // MARK: - Route and Alert Processing Methods
-
-    @objc(processRouteData:resolver:rejecter:)
-    func processRouteData(routeJson: NSDictionary, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        print("🗺️ Processing route data natively")
-
-        guard let links = routeJson["links"] as? [[Any]],
-              let alerts = routeJson["alerts"] as? [[Any]],
-              let offset = routeJson["offset"] as? [Any] else {
-            print("❌ Invalid route data format")
-            rejecter("INVALID_DATA", "Invalid route data format", nil)
-            return
-        }
-
-        // Process and store route data
-        let processedData = processRouteLinks(links: links, alerts: alerts, offset: offset)
-
-        // Store for later use
-        currentRouteData = processedData
-        currentAlerts = alerts
-        routeOffset = offset
-
-        print("✅ Route data processed successfully")
-        print("📊 Processed \(links.count) links and \(alerts.count) alerts")
-
-        resolver(processedData)
-    }
 
     private func processRouteLinks(links: [[Any]], alerts: [[Any]], offset: [Any]) -> [String: Any] {
         var processedLinks: [[String: Any]] = []
@@ -1137,7 +1167,7 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
                 let alertInfo: [String: Any] = [
                     "type": alert[0],
                     "subtype": alert[1],
-                    "speedLimit": alert[2] ?? NSNull(),
+                    "speedLimit": alert[2],
                     "distance": distance,
                     "linkIndex": linkIndex
                 ]
@@ -1148,108 +1178,9 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         return relevantAlerts
     }
 
-    @objc(checkSpeedViolation:resolver:rejecter:)
-    func checkSpeedViolation(currentSpeed: Double, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        guard let location = locationManager.location else {
-            rejecter("NO_LOCATION", "Current location not available", nil)
-            return
-        }
-
-        // Use internal helper method to find nearest alert
-        findNearestAlertInternal(latitude: location.coordinate.latitude,
-                               longitude: location.coordinate.longitude) { alertData in
-            if let alertData = alertData,
-               let alerts = alertData["alerts"] as? [[String: Any]] {
-
-                for alert in alerts {
-                    if let speedLimit = alert["speedLimit"] as? Int,
-                       speedLimit > 0 {
-
-                        let speedKmh = currentSpeed * 3.6 // Convert m/s to km/h
-                        let violation = speedKmh > Double(speedLimit)
-
-                        let speedResult: [String: Any] = [
-                            "isViolation": violation,
-                            "currentSpeed": speedKmh,
-                            "speedLimit": speedLimit,
-                            "excess": max(0, speedKmh - Double(speedLimit)),
-                            "alertInfo": alert
-                        ]
-
-                        // Send speed alert event if violation detected
-                        if violation {
-                            self.sendSpeedAlertEvent(speedResult)
-                        }
-
-                        resolver(speedResult)
-                        return
-                    }
-                }
-            }
-
-            // No speed limit found
-            let result: [String: Any] = [
-                "isViolation": false,
-                "currentSpeed": currentSpeed * 3.6,
-                "speedLimit": NSNull(),
-                "excess": 0
-            ]
-            resolver(result)
-        }
-    }
-
-    private func findNearestAlertInternal(latitude: Double, longitude: Double, completion: @escaping ([String: Any]?) -> Void) {
-        guard let routeData = currentRouteData,
-              let links = routeData["links"] as? [[String: Any]],
-              let alerts = currentAlerts else {
-            completion(nil)
-            return
-        }
-
-        // Find nearest link based on current location
-        var nearestLinkIndex: Int?
-        var minDistance = Double.infinity
-
-        for (index, link) in links.enumerated() {
-            if let startLat = link["startLat"] as? Double,
-               let startLon = link["startLon"] as? Double,
-               let endLat = link["endLat"] as? Double,
-               let endLon = link["endLon"] as? Double {
-
-                // Calculate distance to link segment
-                let distance = distanceToLineSegment(
-                    pointLat: latitude, pointLon: longitude,
-                    startLat: startLat, startLon: startLon,
-                    endLat: endLat, endLon: endLon
-                )
-
-                if distance < minDistance {
-                    minDistance = distance
-                    nearestLinkIndex = index
-                }
-            }
-        }
-
-        // Find alerts for the nearest link
-        if let linkIndex = nearestLinkIndex {
-            let relevantAlerts = findAlertsForLink(linkIndex: linkIndex, alerts: alerts)
-
-            let result: [String: Any] = [
-                "nearestLinkIndex": linkIndex,
-                "distanceToLink": minDistance,
-                "alerts": relevantAlerts
-            ]
-
-            completion(result)
-        } else {
-            completion(nil)
-        }
-    }
-
-    private func sendSpeedAlertEvent(_ alertData: [String: Any]) {
-        print("🚨 Speed violation detected!")
-        sendEvent(withName: "onSpeedAlert", body: alertData)
-    }
+    // REMOVED: checkSpeedViolation - replaced by native speed limit processing
+    // REMOVED: findNearestAlertInternal - no longer needed
+    // REMOVED: sendSpeedAlertEvent - replaced by direct speech synthesis
 
     // MARK: - Route Boundary Detection & API Management
 
@@ -1287,6 +1218,54 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         if closestLinkIndex != currentLinkIndex {
             currentLinkIndex = closestLinkIndex
             print("📍 Current link index updated: \(currentLinkIndex ?? -1)")
+
+            // Check speed limits when link changes (only for speed alert mode)
+            if isSpeedAlertActive {
+                checkSpeedLimitChanges()
+            }
+        }
+    }
+
+    // Check speed limit changes only when currentLinkIndex changes
+    private func checkSpeedLimitChanges() {
+        guard let currentIndex = currentLinkIndex,
+              let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]],
+              currentIndex < links.count else {
+            return
+        }
+
+        let currentLink = links[currentIndex]
+
+        // Get speed limits for current link
+        if let speedLimits = currentLink["speedLimits"] as? [[Int]] {
+            for speedLimitData in speedLimits {
+                if speedLimitData.count >= 2 {
+                    let currentSpeedLimit = speedLimitData[1] // Speed limit value
+
+                    // Only announce if speed limit is different from previous link
+                    if currentSpeedLimit != previousLinkSpeedLimit && currentSpeedLimit > 0 {
+                        print("🚨 SPEED LIMIT CHANGED: Previous: \(previousLinkSpeedLimit ?? 0) → Current: \(currentSpeedLimit) km/h")
+
+                        // Announce the new speed limit (not violation, just information)
+                        speakSpeedLimitAnnouncement(speedLimit: currentSpeedLimit)
+
+                        // Update previous speed limit
+                        previousLinkSpeedLimit = currentSpeedLimit
+                    }
+
+                    // Break after first speed limit (assuming one speed limit per link)
+                    break
+                }
+            }
+        } else {
+            // No speed limit for current link
+            if previousLinkSpeedLimit != nil {
+                print("🚨 SPEED LIMIT REMOVED: Previous: \(previousLinkSpeedLimit ?? 0) → Current: No limit")
+                previousLinkSpeedLimit = nil
+                // Optionally announce that speed limit has been removed
+                // speakSpeedLimitRemoved()
+            }
         }
     }
 
@@ -1355,31 +1334,14 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     private func isLocationWithinCurrentRoute(location: CLLocation) -> Bool {
         guard let routeData = currentRouteData,
-              let links = routeData["links"] as? [[String: Any]],
-              let currentIndex = currentLinkIndex,
-              currentIndex < links.count else {
+              let links = routeData["links"] as? [[String: Any]] else {
             return false
         }
 
-        let currentLink = links[currentIndex]
+        // Enhanced route matching with map-matching algorithm
+        let matchingResult = findBestRouteMatch(location: location, links: links)
 
-        // Check distance to current link
-        if let startLat = currentLink["startLat"] as? Double,
-           let startLon = currentLink["startLon"] as? Double,
-           let endLat = currentLink["endLat"] as? Double,
-           let endLon = currentLink["endLon"] as? Double {
-
-            let distance = distanceToLineSegment(
-                pointLat: location.coordinate.latitude,
-                pointLon: location.coordinate.longitude,
-                startLat: startLat, startLon: startLon,
-                endLat: endLat, endLon: endLon
-            )
-
-            return distance <= routeBoundaryThreshold
-        }
-
-        return false
+        return matchingResult.isWithinRoute
     }
 
     private func shouldRequestNewRouteData(for location: CLLocation) -> Bool {
@@ -1412,51 +1374,45 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
     }
 
     private func requestRouteDataFromAPI(for location: CLLocation) {
-        guard let apiEndpoint = routeAPIEndpoint, !apiRequestInProgress else {
-            print("❌ No API endpoint set or request in progress")
+        guard !apiRequestInProgress else {
+            print("❌ API request already in progress")
             return
         }
 
         apiRequestInProgress = true
         lastAPIRequestLocation = location
 
-        print("🌐 Requesting route data from API for location: \(location.coordinate.latitude), \(location.coordinate.longitude)")
+        print("🌐 Requesting route data for location: \(location.coordinate.latitude), \(location.coordinate.longitude)")
 
-        // Create API request
-        let urlString = "\(apiEndpoint)?lat=\(location.coordinate.latitude)&lon=\(location.coordinate.longitude)"
-        guard let url = URL(string: urlString) else {
-            apiRequestInProgress = false
-            return
+        // Simulate API call with mock data - replace with real API call when endpoint is available
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.apiRequestInProgress = false
+
+            // Mock response data based on your provided sample
+            let mockRouteData: [String: Any] = [
+                "links": [
+                    [3084042, 1, [106.7008008157191, 10.728222624412965, 106.701535, 10.728238], 80, [[0, 60]]],
+                    [3097857, 1, [106.701535, 10.728238, 106.70235, 10.728245], 89, [[0, 70]]],
+                    [4659, 1, [106.70235, 10.728245, 106.703285, 10.728254], 102, [[0, 70]]],
+                    [3378, 1, [106.703285, 10.728254, 106.704197, 10.728271], 99, [[0,80]]],
+                    [3134099, 1, [106.704197, 10.728271, 106.705073, 10.728287], 95, [[0, 60]]],
+                    [3276, 1, [106.705073, 10.728287, 106.706819, 10.728338], 190, [[0, 60]]],
+                    [3379, 1, [106.706819, 10.728338, 106.708625, 10.728372], 197, [[0, 60]]],
+                    [3226, 1, [106.708625, 10.728372, 106.712313, 10.728441], 402, [[0, 60]]]
+                ],
+                "alerts": [
+                    [0, 167, 60, 18], [0, 211, NSNull(), 185], [1, 1, NSNull(), 253], [2, NSNull(), NSNull(), 271],
+                    [0, 169, NSNull(), 293], [0, 167, 60, 320], [0, 169, NSNull(), 478], [0, 167, 60, 489],
+                    [0, 68, NSNull(), 499], [0, 68, NSNull(), 582], [2, NSNull(), NSNull(), 655], [0, 167, 60, 679],
+                    [0, 169, NSNull(), 684], [2, NSNull(), NSNull(), 852], [0, 169, NSNull(), 873], [0, 167, 60, 885],
+                    [0, 55, NSNull(), 1151], [2, NSNull(), NSNull(), 1254]
+                ],
+                "offset": [3084042, 24, 1]
+            ]
+
+            print("✅ Mock route data received - Processing...")
+            self?.handleNewRouteData(mockRouteData, for: location)
         }
-
-        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                self?.apiRequestInProgress = false
-
-                if let error = error {
-                    print("❌ Route API request failed: \(error.localizedDescription)")
-                    self?.onRouteUpdateCallback?(false, nil)
-                    return
-                }
-
-                guard let data = data else {
-                    print("❌ No data received from route API")
-                    self?.onRouteUpdateCallback?(false, nil)
-                    return
-                }
-
-                do {
-                    if let jsonData = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        self?.handleNewRouteData(jsonData, for: location)
-                    }
-                } catch {
-                    print("❌ Failed to parse route API response: \(error.localizedDescription)")
-                    self?.onRouteUpdateCallback?(false, nil)
-                }
-            }
-        }
-
-        task.resume()
     }
 
     private func handleNewRouteData(_ data: [String: Any], for location: CLLocation) {
@@ -1474,14 +1430,67 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             currentAlerts = alerts
             routeOffset = offset
 
-            // Find current link index
+            // Reset previous speed limit when new route data is received
+            previousLinkSpeedLimit = nil
+
+            // Set initial currentLinkIndex to first link when new route data is received from API
+            if !links.isEmpty {
+                currentLinkIndex = 0
+                print("🎯 Initial currentLinkIndex set to: 0 (first link from API)")
+            } else {
+                currentLinkIndex = nil
+                print("⚠️ No links available from API, currentLinkIndex set to nil")
+            }
+
+            // Find current link index based on location after setting initial value
             updateCurrentLinkIndex(for: location)
 
-            // Extract and cache speed limit alerts
-            extractSpeedLimitAlerts()
+            // Read current speed limit immediately when new route data is received (if currentLinkIndex exists)
+            if isSpeedAlertActive && currentLinkIndex != nil {
+                print("🔊 Reading current speed limit immediately after receiving new route data")
+                readCurrentSpeedLimitImmediately()
+            }
 
             print("📊 Route data updated - Links: \(links.count), Alerts: \(alerts.count)")
+
             onRouteUpdateCallback?(true, processedData)
+        }
+    }
+
+    // Read current speed limit immediately when new route data is received
+    private func readCurrentSpeedLimitImmediately() {
+        guard let currentIndex = currentLinkIndex,
+              let routeData = currentRouteData,
+              let links = routeData["links"] as? [[String: Any]],
+              currentIndex < links.count else {
+            print("⚠️ Cannot read speed limit - no valid currentLinkIndex")
+            return
+        }
+
+        let currentLink = links[currentIndex]
+
+        // Get speed limits for current link
+        if let speedLimits = currentLink["speedLimits"] as? [[Int]] {
+            for speedLimitData in speedLimits {
+                if speedLimitData.count >= 2 {
+                    let currentSpeedLimit = speedLimitData[1] // Speed limit value
+
+                    if currentSpeedLimit > 0 {
+                        print("🔊 IMMEDIATE SPEED LIMIT READ: \(currentSpeedLimit) km/h (new route data)")
+
+                        // Always announce speed limit when new route data is received
+                        speakSpeedLimitAnnouncement(speedLimit: currentSpeedLimit)
+
+                        // Update previous speed limit for future comparisons
+                        previousLinkSpeedLimit = currentSpeedLimit
+                    }
+
+                    // Break after first speed limit (assuming one speed limit per link)
+                    break
+                }
+            }
+        } else {
+            print("⚠️ No speed limit found for current link")
         }
     }
 
@@ -1491,59 +1500,34 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
             return
         }
 
-        var nearestIndex: Int?
-        var minDistance = Double.infinity
+        let matchingResult = findBestRouteMatch(location: location, links: links)
 
-        for (index, link) in links.enumerated() {
-            if let startLat = link["startLat"] as? Double,
-               let startLon = link["startLon"] as? Double,
-               let endLat = link["endLat"] as? Double,
-               let endLon = link["endLon"] as? Double {
+        if let newLinkIndex = matchingResult.linkIndex,
+           matchingResult.confidence > 0.7 { // Only update if confident
 
-                let distance = distanceToLineSegment(
-                    pointLat: location.coordinate.latitude,
-                    pointLon: location.coordinate.longitude,
-                    startLat: startLat, startLon: startLon,
-                    endLat: endLat, endLon: endLon
-                )
+            if newLinkIndex != currentLinkIndex {
+                print("🎯 Link index updated: \(currentLinkIndex ?? -1) → \(newLinkIndex)")
+                print("📍 Snap distance: \(String(format: "%.1f", matchingResult.distanceToRoute))m")
+                print("📊 Progress on link: \(String(format: "%.1f", matchingResult.progressOnLink * 100))%")
+                print("🎯 Confidence: \(String(format: "%.1f", matchingResult.confidence * 100))%")
 
-                if distance < minDistance {
-                    minDistance = distance
-                    nearestIndex = index
+                currentLinkIndex = newLinkIndex
+
+                // Store snapped location for better tracking
+                if let snappedLocation = matchingResult.snappedLocation {
+                    print("🧭 GPS: (\(location.coordinate.latitude), \(location.coordinate.longitude))")
+                    print("📍 Snapped: (\(snappedLocation.latitude), \(snappedLocation.longitude))")
+                }
+
+                // Check speed limits when link changes (only for speed alert mode)
+                if isSpeedAlertActive {
+                    checkSpeedLimitChanges()
                 }
             }
         }
-
-        if let index = nearestIndex {
-            currentLinkIndex = index
-            print("🎯 Current link index updated to: \(index)")
-        }
     }
 
-    private func extractSpeedLimitAlerts() {
-        guard let alerts = currentAlerts else { return }
-
-        speedLimitAlerts.removeAll()
-
-        for (index, alert) in alerts.enumerated() {
-            if alert.count >= 4,
-               let type = alert[0] as? Int,
-               type == 0, // Speed limit alert type
-               let speedLimit = alert[2] as? Int,
-               speedLimit > 0 {
-
-                speedLimitAlerts["alert_\(index)"] = [
-                    "type": type,
-                    "speedLimit": speedLimit,
-                    "distance": alert[3]
-                ]
-            }
-        }
-
-        print("🚨 Extracted \(speedLimitAlerts.count) speed limit alerts")
-    }
-
-    private func checkSpeedLimitsForCurrentLocation(_ location: CLLocation) {
+    private func checkSpeedLimitsForCurrentLocation() {
         guard let currentIndex = currentLinkIndex,
               let routeData = currentRouteData,
               let links = routeData["links"] as? [[String: Any]],
@@ -1557,30 +1541,258 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         if let speedLimits = currentLink["speedLimits"] as? [[Int]] {
             for speedLimitData in speedLimits {
                 if speedLimitData.count >= 2 {
-                    let speedLimit = speedLimitData[1] // Speed limit value
+                    let currentSpeedLimit = speedLimitData[1] // Speed limit value
 
-                    // Convert current speed from m/s to km/h
-                    let currentSpeedKmh = location.speed * 3.6
+                    // Only announce if speed limit is different from previous link
+                    if currentSpeedLimit != previousLinkSpeedLimit && currentSpeedLimit > 0 {
+                        print("🚨 SPEED LIMIT CHANGED: Previous: \(previousLinkSpeedLimit ?? 0) → Current: \(currentSpeedLimit) km/h")
 
-                    if currentSpeedKmh > Double(speedLimit) && speedLimit > 0 {
-                        // Speed violation detected
-                        let violation: [String: Any] = [
-                            "currentSpeed": currentSpeedKmh,
-                            "speedLimit": speedLimit,
-                            "excess": currentSpeedKmh - Double(speedLimit),
-                            "severity": currentSpeedKmh > Double(speedLimit) + 10 ? "critical" : "warning",
-                            "timestamp": Date().timeIntervalSince1970 * 1000,
-                            "location": [
-                                "latitude": location.coordinate.latitude,
-                                "longitude": location.coordinate.longitude
-                            ]
-                        ]
+                        // Announce the new speed limit (not violation, just information)
+                        speakSpeedLimitAnnouncement(speedLimit: currentSpeedLimit)
 
-                        print("🚨 SPEED VIOLATION: \(currentSpeedKmh) km/h > \(speedLimit) km/h")
-                        sendEvent(withName: "onSpeedAlert", body: violation)
+                        // Update previous speed limit
+                        previousLinkSpeedLimit = currentSpeedLimit
                     }
+
+                    // Break after first speed limit (assuming one speed limit per link)
+                    break
                 }
             }
+        } else {
+            // No speed limit for current link
+            if previousLinkSpeedLimit != nil {
+                print("🚨 SPEED LIMIT REMOVED: Previous: \(previousLinkSpeedLimit ?? 0) → Current: No limit")
+                previousLinkSpeedLimit = nil
+                // Optionally announce that speed limit has been removed
+                // speakSpeedLimitRemoved()
+            }
         }
+    }
+
+    // MARK: - Enhanced Map Matching for Route Following
+
+    private struct RouteMatchingResult {
+        let isWithinRoute: Bool
+        let snappedLocation: CLLocationCoordinate2D?
+        let linkIndex: Int?
+        let distanceToRoute: Double
+        let progressOnLink: Double // 0.0 to 1.0
+        let confidence: Double     // 0.0 to 1.0
+    }
+
+    private func findBestRouteMatch(location: CLLocation, links: [[String: Any]]) -> RouteMatchingResult {
+        var bestMatch: RouteMatchingResult?
+        var bestScore = Double.infinity
+
+        // Check current link first (higher priority)
+        if let currentIndex = currentLinkIndex,
+           currentIndex < links.count {
+            let currentLinkMatch = evaluateLinkMatch(location: location, link: links[currentIndex], linkIndex: currentIndex, isCurrentLink: true)
+
+            if currentLinkMatch.distanceToRoute <= routeBoundaryThreshold * 1.5 { // More lenient for current link
+                bestMatch = currentLinkMatch
+                bestScore = currentLinkMatch.distanceToRoute
+            }
+        }
+
+        // Check adjacent links (look ahead and behind)
+        let searchRange = min(3, links.count) // Check up to 3 links ahead/behind
+        let startIndex = max(0, (currentLinkIndex ?? 0) - searchRange)
+        let endIndex = min(links.count - 1, (currentLinkIndex ?? 0) + searchRange)
+
+        for i in startIndex...endIndex {
+            if i == currentLinkIndex { continue } // Already checked
+
+            let linkMatch = evaluateLinkMatch(location: location, link: links[i], linkIndex: i, isCurrentLink: false)
+
+            // Scoring: distance + direction consistency + sequence penalty
+            let sequencePenalty = Double(abs(i - (currentLinkIndex ?? i))) * 10.0 // Prefer nearby links
+            let totalScore = linkMatch.distanceToRoute + sequencePenalty
+
+            if totalScore < bestScore && linkMatch.distanceToRoute <= routeBoundaryThreshold {
+                bestMatch = linkMatch
+                bestScore = totalScore
+            }
+        }
+
+        // If no good match found, return default
+        if bestMatch == nil {
+            return RouteMatchingResult(
+                isWithinRoute: false,
+                snappedLocation: nil,
+                linkIndex: nil,
+                distanceToRoute: Double.infinity,
+                progressOnLink: 0.0,
+                confidence: 0.0
+            )
+        }
+
+        return bestMatch!
+    }
+
+    private func evaluateLinkMatch(location: CLLocation, link: [String: Any], linkIndex: Int, isCurrentLink: Bool) -> RouteMatchingResult {
+        guard let startLat = link["startLat"] as? Double,
+              let startLon = link["startLon"] as? Double,
+              let endLat = link["endLat"] as? Double,
+              let endLon = link["endLon"] as? Double else {
+            return RouteMatchingResult(isWithinRoute: false, snappedLocation: nil, linkIndex: nil, distanceToRoute: Double.infinity, progressOnLink: 0.0, confidence: 0.0)
+        }
+
+        let currentLat = location.coordinate.latitude
+        let currentLon = location.coordinate.longitude
+
+        // Calculate closest point on link segment (snap-to-route)
+        let snappedPoint = snapToLineSegment(
+            pointLat: currentLat, pointLon: currentLon,
+            startLat: startLat, startLon: startLon,
+            endLat: endLat, endLon: endLon
+        )
+
+        // Calculate distance from GPS point to snapped point
+        let distanceToRoute = calculateDistance(
+            lat1: currentLat, lon1: currentLon,
+            lat2: snappedPoint.latitude, lon2: snappedPoint.longitude
+        )
+
+        // Calculate progress along the link (0.0 to 1.0)
+        let progressOnLink = calculateProgressOnLink(
+            snappedLat: snappedPoint.latitude, snappedLon: snappedPoint.longitude,
+            startLat: startLat, startLon: startLon,
+            endLat: endLat, endLon: endLon
+        )
+
+        // Calculate confidence based on multiple factors
+        let confidence = calculateMatchingConfidence(
+            distanceToRoute: distanceToRoute,
+            progressOnLink: progressOnLink,
+            isCurrentLink: isCurrentLink,
+            location: location
+        )
+
+        // Enhanced threshold based on movement direction and speed
+        let dynamicThreshold = calculateDynamicThreshold(location: location, isCurrentLink: isCurrentLink)
+        let isWithinRoute = distanceToRoute <= dynamicThreshold
+
+        return RouteMatchingResult(
+            isWithinRoute: isWithinRoute,
+            snappedLocation: snappedPoint,
+            linkIndex: linkIndex,
+            distanceToRoute: distanceToRoute,
+            progressOnLink: progressOnLink,
+            confidence: confidence
+        )
+    }
+
+    private func snapToLineSegment(pointLat: Double, pointLon: Double,
+                                  startLat: Double, startLon: Double,
+                                  endLat: Double, endLon: Double) -> CLLocationCoordinate2D {
+
+        // Vector from start to end of segment
+        let segmentLat = endLat - startLat
+        let segmentLon = endLon - startLon
+
+        // Vector from start to point
+        let pointLat_rel = pointLat - startLat
+        let pointLon_rel = pointLon - startLon
+
+        // Calculate parameter t for closest point on line segment
+        let segmentLengthSquared = segmentLat * segmentLat + segmentLon * segmentLon
+
+        if segmentLengthSquared == 0 {
+            // Degenerate segment (start == end)
+            return CLLocationCoordinate2D(latitude: startLat, longitude: startLon)
+        }
+
+        // Project point onto line segment
+        let t = (pointLat_rel * segmentLat + pointLon_rel * segmentLon) / segmentLengthSquared
+
+        // Clamp t to [0, 1] to stay within segment
+        let clampedT = max(0.0, min(1.0, t))
+
+        // Calculate snapped coordinates
+        let snappedLat = startLat + clampedT * segmentLat
+        let snappedLon = startLon + clampedT * segmentLon
+
+        return CLLocationCoordinate2D(latitude: snappedLat, longitude: snappedLon)
+    }
+
+    private func calculateProgressOnLink(snappedLat: Double, snappedLon: Double,
+                                       startLat: Double, startLon: Double,
+                                       endLat: Double, endLon: Double) -> Double {
+
+        let totalDistance = calculateDistance(lat1: startLat, lon1: startLon, lat2: endLat, lon2: endLon)
+
+        if totalDistance == 0 { return 0.0 }
+
+        let progressDistance = calculateDistance(lat1: startLat, lon1: startLon, lat2: snappedLat, lon2: snappedLon)
+
+        return min(1.0, progressDistance / totalDistance)
+    }
+
+    private func calculateMatchingConfidence(distanceToRoute: Double, progressOnLink: Double,
+                                           isCurrentLink: Bool, location: CLLocation) -> Double {
+        var confidence = 1.0
+
+        // Distance factor (closer = higher confidence)
+        let distanceFactor = max(0.0, 1.0 - (distanceToRoute / (routeBoundaryThreshold * 2)))
+        confidence *= distanceFactor
+
+        // GPS accuracy factor
+        let accuracyFactor = location.horizontalAccuracy < 20 ? 1.0 : max(0.5, 20.0 / location.horizontalAccuracy)
+        confidence *= accuracyFactor
+
+        // Current link bonus
+        if isCurrentLink {
+            confidence *= 1.2
+        }
+
+        // Speed consistency (if moving, prefer links in direction of movement)
+        if location.speed > 1.0 && location.course >= 0 { // Moving with valid course
+            // This could be enhanced with bearing comparison to link direction
+            confidence *= 1.1
+        }
+
+        return max(0.0, min(1.0, confidence))
+    }
+
+    private func calculateDynamicThreshold(location: CLLocation, isCurrentLink: Bool) -> Double {
+        var threshold = routeBoundaryThreshold
+
+        // Increase threshold based on GPS accuracy
+        if location.horizontalAccuracy > 10 {
+            threshold += location.horizontalAccuracy * 0.5
+        }
+
+        // Increase threshold for current link (more lenient)
+        if isCurrentLink {
+            threshold *= 1.5
+        }
+
+        // Increase threshold based on speed (faster = more GPS drift)
+        if location.speed > 10 { // > 36 km/h
+            let speedFactor = 1.0 + (location.speed - 10) * 0.1
+            threshold *= speedFactor
+        }
+
+        // Cap maximum threshold
+        return min(threshold, 150.0) // Max 150m threshold
+    }
+
+    private func calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double) -> Double {
+        // Haversine formula for more accurate distance calculation
+        let R = 6371000.0 // Earth radius in meters
+
+        let lat1Rad = lat1 * .pi / 180
+        let lat2Rad = lat2 * .pi / 180
+        let deltaLatRad = (lat2 - lat1) * .pi / 180
+        let deltaLonRad = (lon2 - lon1) * .pi / 180
+
+        let a = sin(deltaLatRad/2) * sin(deltaLatRad/2) +
+                cos(lat1Rad) * cos(lat2Rad) *
+                sin(deltaLonRad/2) * sin(deltaLonRad/2)
+
+        let c = 2 * atan2(sqrt(a), sqrt(1-a))
+
+        return R * c
     }
 }
