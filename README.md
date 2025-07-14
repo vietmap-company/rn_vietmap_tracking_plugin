@@ -158,7 +158,6 @@ const stopBasicTracking = async () => {
   }
 };
 ```
-```
 
 ### Enhanced Background Tracking (background_location_2 Strategy)
 
@@ -438,262 +437,60 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 2. Install dependencies: `npm install`
 3. Run the example app: `npm run example ios` or `npm run example android`
 
-## 📄 License
+## 🏃 How to Run the Example App After Clone
 
-MIT License - see the [LICENSE](LICENSE) file for details.
+This project uses a monorepo structure. Để chạy app ví dụ (`example`) sau khi clone repo, hãy làm theo các bước sau:
 
-## 🔧 Troubleshooting
+### 1. Cài đặt dependencies ở cả root và example
 
-### Common Issues
+```bash
+# Ở thư mục gốc của repo
+npm install
 
-**Android: Location updates not working in background**
-- Ensure all required permissions are added to AndroidManifest.xml
-- Check that battery optimization is disabled for your app
-- Verify Google Play Services is installed and updated
+# Di chuyển vào thư mục example
+cd example
+npm install
 
-**iOS: Background location not working**
-- Add NSLocationAlwaysAndWhenInUseUsageDescription to Info.plist
-- Include "location" in UIBackgroundModes
-- Request "always" location permission
+# Đảm bảo các package sau được cài riêng trong example:
+npm install react react-native @babel/runtime
+```
 
-**TypeScript errors**
-- Ensure you're using TypeScript 4.5 or higher
-- Check that all peer dependencies are installed
+> **Lưu ý:**
+> - Nếu bạn dùng `yarn`, thay thế `npm install` bằng `yarn install`.
+> - Việc cài riêng `react`, `react-native`, `@babel/runtime` trong `example` là bắt buộc để Metro không bị lỗi module resolution.
 
-### Getting Help
+### 2. Chạy app ví dụ
 
-- 📚 Check the [Usage Guide](./USAGE.md) for detailed examples
-- 🐛 Report bugs in [GitHub Issues](https://github.com/yourusername/rn_vietmap_tracking_plugin/issues)
-- 💬 Ask questions in [Discussions](https://github.com/yourusername/rn_vietmap_tracking_plugin/discussions)
+```bash
+# Trong thư mục example
+# iOS
+npx react-native run-ios
+
+# Android
+npx react-native run-android
+```
+
+### 3. Xử lý lỗi Metro hoặc module resolution
+
+Nếu gặp lỗi như `Unable to resolve module react` hoặc `@babel/runtime`, hãy thử:
+
+```bash
+# Xóa node_modules và lock file ở cả root và example
+rm -rf node_modules example/node_modules package-lock.json example/package-lock.json yarn.lock example/yarn.lock
+
+# Cài lại dependencies
+npm install
+cd example
+npm install
+npm install react react-native @babel/runtime
+```
+
+### 4. Troubleshooting khác
+- Đảm bảo Metro chỉ sử dụng `example/node_modules` (đã cấu hình trong `example/metro.config.js`).
+- Nếu vẫn lỗi, thử khởi động lại Metro:
+  ```bash
+  npx react-native start --reset-cache
+  ```
+- Đảm bảo bạn đang dùng Node.js >= 16 và npm >= 7.
 
 ---
-
-**Made with ❤️ using [create-react-native-library](https://github.com/callstack/react-native-builder-bob)**
-
-## 🌙 Background Tracking Details
-
-### Background Location Strategy
-
-This plugin implements the **background_location_2 strategy** for reliable background GPS tracking:
-
-#### iOS Implementation:
-- **Continuous Location Updates**: Uses `startUpdatingLocation()` instead of timer-based requests
-- **Background Task Chaining**: Automatically renews background tasks before 30-second expiration
-- **Deferred Location Updates**: Optimizes battery usage when location changes are minimal
-- **Significant Location Changes**: Fallback monitoring for major location changes
-- **iOS 13+ Background Tasks**: Enhanced background processing with `BGTaskScheduler`
-
-#### Android Implementation:
-- **Continuous Location Updates**: Uses `FusedLocationProviderClient` with continuous requests
-- **Foreground Service**: Optional foreground service for long-running background tracking
-- **Battery Optimization**: Intelligent throttling based on `intervalMs` parameter
-- **Background Location Permission**: Handles Android 10+ background location restrictions
-
-### Dual Tracking Mechanism: Timer + Distance
-
-The plugin uses **two complementary filters** to optimize both accuracy and battery life:
-
-#### 1. **Distance Filter** (Native iOS/Android)
-- Controls **when** location updates are triggered based on movement
-- iOS: `locationManager.distanceFilter` - only calls `didUpdateLocations` when user moves ≥ threshold
-- Android: `LocationRequest.setSmallestDisplacement()` - similar behavior
-- **Configurable via `distanceFilter` parameter** (default: 10 meters)
-
-#### 2. **Timer Throttling** (JavaScript controlled)
-- Controls **frequency** of updates sent to React Native
-- Configured via `intervalMs` parameter in `startTracking(backgroundMode, intervalMs, forceUpdateBackground, distanceFilter)`
-- Applied in native code after receiving location from distance filter
-
-#### **Example Scenario:**
-```javascript
-// Configuration with custom distance filter
-await startTracking(true, 30000, false, 15); // 30-second timer + 15m distance filter
-
-// Timeline of user movement:
-// 10:00:00 - User moves 20m → iOS calls didUpdateLocations → Timer OK (first update) → ✅ Send update
-// 10:00:15 - User moves 12m → iOS doesn't call (< 15m distance) → ❌ No update
-// 10:00:30 - User moves 18m → iOS calls didUpdateLocations → Timer OK (>30s passed) → ✅ Send update
-// 10:00:45 - User moves 8m  → iOS doesn't call (< 15m distance) → ❌ No update
-```
-
-#### **Benefits of Dual Mechanism:**
-- **Distance Filter**: Prevents updates when user is stationary or moving short distances (saves battery)
-- **Timer Throttling**: Prevents excessive updates when user moves frequently (saves battery + bandwidth)
-- **Combined Effect**: Only sends meaningful location updates at controlled intervals
-- **Customizable Precision**: Adjust `distanceFilter` based on use case (5m for navigation, 50m for battery saver)
-
-#### **Configuration Examples:**
-```javascript
-// Navigation - frequent updates with high precision
-await startTracking(false, 1000, false, 5);  // 1s timer + 5m distance
-
-// General tracking - balanced performance
-await startTracking(true, 30000, false, 10);  // 30s timer + 10m distance
-
-// Battery saver - minimal updates with large distance threshold
-await startTracking(true, 300000, false, 50); // 5min timer + 50m distance
-
-// Force mode - bypasses distance filter completely
-await startTracking(true, 15000, true, 10);   // 15s timer, distanceFilter ignored
-```
-
-### Distance Filter Configuration Guide
-
-Choose the right `distanceFilter` value based on your use case:
-
-| Use Case | Recommended `distanceFilter` | Reasoning |
-|----------|------------------------------|-----------|
-| **Turn-by-turn Navigation** | 5-10 meters | High precision for accurate route guidance |
-| **Fitness Tracking** | 10-15 meters | Balance between accuracy and battery life |
-| **General Monitoring** | 15-25 meters | Reasonable updates without excessive battery drain |
-| **Battery Saver Mode** | 50-100 meters | Minimal updates, maximum battery conservation |
-| **Delivery/Fleet Tracking** | 20-30 meters | Track significant movement, reduce noise |
-
-### Dual Tracking Mechanism Example
-
-Here's a practical scenario showing how distance filter (15m) and timer throttling (30s interval) work together:
-
-```
-Configuration: distanceFilter = 15m, intervalMs = 30000 (30 seconds)
-
-Timeline:
-- 10:00:00 - User moves 20m → Timer OK → ✅ Send update
-- 10:00:15 - User moves 12m → Distance < 15m → ❌ No update
-- 10:00:30 - User moves 18m → Timer OK → ✅ Send update
-- 10:00:45 - User moves 8m  → Distance < 15m → ❌ No update
-```
-
-**How it Works:**
-1. **Distance Filter (Native)**: iOS/Android only triggers location callbacks when movement ≥ 15m
-2. **Timer Throttling (Plugin)**: Our plugin only sends updates if ≥ 30s have passed since last update
-3. **Result**: Battery-efficient tracking that captures meaningful movement while avoiding excessive updates
-
-### Key Advantages:
-
-1. **No 30-Second Limitation**: Unlike timer-based approaches, continuous updates persist beyond background task limits
-2. **Battery Efficient**: Dual filtering (distance + timer) minimizes unnecessary updates and power consumption
-3. **Reliable Background Tracking**: Background task chaining ensures uninterrupted location services
-4. **Cross-Platform Consistency**: Similar behavior across iOS and Android platforms
-5. **Intelligent Filtering**: Only processes location updates when user actually moves meaningful distances
-6. **Configurable Precision**: Customizable `distanceFilter` allows fine-tuning for different use cases
-
-### Distance Filter Best Practices:
-
-#### **Dynamic Distance Filtering**
-```typescript
-// Adjust distance filter based on user activity
-const getOptimalDistanceFilter = (userActivity: string, speed: number) => {
-  switch (userActivity) {
-    case 'walking':
-      return speed > 1.5 ? 5 : 10;  // 5m for fast walking, 10m for slow
-    case 'driving':
-      return speed > 15 ? 20 : 10;  // 20m for highway, 10m for city driving
-    case 'stationary':
-      return 50;                    // Large filter when not moving
-    default:
-      return 15;                    // Balanced default
-  }
-};
-
-// Example usage
-const distanceFilter = getOptimalDistanceFilter(detectedActivity, currentSpeed);
-await startTracking(true, 10000, false, distanceFilter);
-```
-
-#### **Common Pitfalls to Avoid**
-- ❌ **Too Small Filter (≤2m)**: May trigger on GPS noise, excessive battery drain
-- ❌ **Too Large Filter (≥200m)**: Miss important location changes, poor user experience
-- ❌ **Fixed Filter**: Not adapting to different scenarios reduces efficiency
-- ✅ **Adaptive Filter**: Adjust based on speed, activity, and app state
-
-#### **Optimal Settings by Scenario**
-```typescript
-// Indoor/Office tracking - larger filter to avoid GPS drift
-await startTracking(true, 60000, false, 25);
-
-// Outdoor fitness - medium filter for good tracking without noise
-await startTracking(true, 10000, false, 12);
-
-// Vehicle navigation - small filter for turn-by-turn accuracy
-await startTracking(false, 2000, false, 6);
-
-// Background monitoring - large filter for battery conservation
-await startTracking(true, 120000, false, 75);
-```
-
-### Permission Requirements:
-
-#### iOS:
-- `NSLocationWhenInUseUsageDescription`: For foreground tracking
-- `NSLocationAlwaysAndWhenInUseUsageDescription`: For background tracking
-- `UIBackgroundModes`: Include `location`, `background-processing`, `background-fetch`
-
-#### Android:
-- `ACCESS_FINE_LOCATION`: For precise location access
-- `ACCESS_BACKGROUND_LOCATION`: Required for background tracking (Android 10+)
-- `FOREGROUND_SERVICE_LOCATION`: For foreground service implementation
-
-### Force Update Background Mode
-
-**When to use `forceUpdateBackground: true`:**
-
-```typescript
-// Problem: iOS background location becomes unreliable after 10-30 minutes
-await startTracking(true, 30000, false, 10); // May stop working in background after 30min
-
-// Solution: Force continuous updates bypassing iOS system throttling
-await startTracking(true, 10000, true, 10);  // Continuous updates regardless of OS limits
-//                   ↑     ↑      ↑     ↑
-//               background 10s   force  distanceFilter ignored in force mode
-```
-
-#### **Comparison of Tracking Modes:**
-
-| Mode | `forceUpdateBackground` | `distanceFilter` | Behavior | Reliability | Battery Impact |
-|------|------------------------|------------------|----------|-------------|----------------|
-| **Standard Background** | `false` | ✅ Applied (e.g., 10m) | Distance filter + timer throttling | Good for 10-30 min, then sporadic | Low |
-| **Forced Background** | `true` | ❌ Ignored | Timer-based requests, no distance filter | Continuous, bypasses iOS throttling | Higher |
-| **Foreground** | `false` | ✅ Applied (e.g., 5m) | Continuous updates with distance filtering | Excellent | Low-Medium |
-
-#### **How Force Update Works:**
-
-1. **Standard Mode (`forceUpdateBackground: false`):**
-   ```
-   iOS CLLocationManager.startUpdatingLocation() + distanceFilter
-   → Distance filter triggers (≥10m movement) → Plugin throttles → Send to React Native
-   → Subject to iOS background limitations after 30min
-   ```
-
-2. **Force Mode (`forceUpdateBackground: true`):**
-   ```
-   Timer.scheduleAtFixedRate(intervalMs) + No distance filter
-   → Request location directly → Always send → React Native
-   → Bypasses iOS distance filter and system throttling completely
-   ```
-
-#### **Trade-offs:**
-
-**Advantages of Force Mode:**
-- ✅ Continuous updates even after 30+ minutes in background
-- ✅ Predictable timing intervals
-- ✅ Not affected by iOS system location throttling
-- ✅ Works during low movement periods
-
-**Disadvantages of Force Mode:**
-- ❌ Higher battery consumption
-- ❌ May receive same location multiple times when stationary
-- ❌ Less efficient than distance-based filtering
-- ❌ Requires careful interval tuning
-
-#### **Recommended Usage:**
-
-```typescript
-// For delivery tracking, navigation - use force mode
-await startTracking(true, 15000, true);  // 15s intervals, always active
-
-// For fitness tracking, general monitoring - use standard mode
-await startTracking(true, 30000, false); // 30s intervals, distance filtered
-
-// For foreground apps - use standard mode
-await startTracking(false, 5000, false); // 5s intervals, high accuracy
-```
