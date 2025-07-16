@@ -9,6 +9,8 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.*
@@ -348,6 +350,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       .emit("onTrackingStatusChanged", status)
   }
 
+  @RequiresApi(Build.VERSION_CODES.O)
   private fun startBackgroundLocationService(config: ReadableMap) {
     backgroundLocationService = Intent(reactApplicationContext, LocationTrackingService::class.java).apply {
       putExtra("config", Arguments.toBundle(config))
@@ -356,6 +359,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   // Enhanced tracking methods for background_location_2 strategy
+  @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
   @ReactMethod
   fun startTracking(backgroundMode: Boolean, intervalMs: Double, forceUpdateBackground: Boolean?, distanceFilter: Double?, promise: Promise) {
     val actualForceUpdate = forceUpdateBackground ?: false
@@ -1209,6 +1213,8 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
             if (jsonData != null) {
               // Parse and handle new route data
               handleNewRouteDataFromAPI(jsonData, location)
+            } else {
+              Log.e(NAME, "❌ Route API response is empty")
             }
           } else {
             Log.e(NAME, "❌ Route API request failed: ${response.code}")
@@ -1509,11 +1515,11 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
 
     Log.d(NAME, "🔍 [DEBUG] Best match found:")
-    Log.d(NAME, "  - Link index: ${bestMatch.linkIndex}")
-    Log.d(NAME, "  - Distance: ${"%.1f".format(bestMatch.distanceToRoute)}m")
-    Log.d(NAME, "  - Confidence: ${"%.1f".format(bestMatch.confidence * 100)}%")
+    Log.d(NAME, "  - Link index: ${bestMatch?.linkIndex}")
+    Log.d(NAME, "  - Distance: ${"%.1f".format(bestMatch?.distanceToRoute)}m")
+    Log.d(NAME, "  - Confidence: ${"%.1f".format(bestMatch!!.confidence * 100)}%")
 
-    return bestMatch
+    return bestMatch as RouteMatchingResult
   }
 
   private fun evaluateLinkMatch(location: Location, link: ReadableMap, linkIndex: Int, isCurrentLink: Boolean): RouteMatchingResult {
