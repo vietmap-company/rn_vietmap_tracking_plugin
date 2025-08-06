@@ -78,6 +78,51 @@ RCT_EXTERN_METHOD(enableRouteBoundaryDetection:(double)threshold
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// Configuration methods
+RCT_EXTERN_METHOD(configure:(NSString *)apiKey
+                  baseURL:(NSString *)baseURL
+                  autoUpload:(BOOL)autoUpload
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(configureAlertAPI:(NSString *)url
+                  apiKey:(NSString *)apiKey
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+// Data management methods
+RCT_EXTERN_METHOD(encodeLocationData:(NSDictionary *)locationDict
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(decodeLocationData:(NSString *)base64String
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(getCachedLocationsCount:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(uploadCachedLocationsManually:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(clearCachedLocations:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+// Utility methods
+RCT_EXTERN_METHOD(getTrackingHealthStatus:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(isNetworkConnected:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(setTrackingStatus:(NSString *)status
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(setAutoUpload:(BOOL)enabled
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 + (BOOL)requiresMainQueueSetup
 {
   return YES;
@@ -85,7 +130,7 @@ RCT_EXTERN_METHOD(enableRouteBoundaryDetection:(double)threshold
 
 - (NSArray<NSString *> *)supportedEvents
 {
-  return @[@"onLocationUpdate", @"onTrackingStatusChanged", @"onLocationError", @"onPermissionChanged", @"onSpeedAlert"];
+  return @[@"onLocationUpdate", @"onTrackingStatusChanged", @"onLocationError", @"onPermissionChanged", @"onRouteUpdate"];
 }
 
 @end

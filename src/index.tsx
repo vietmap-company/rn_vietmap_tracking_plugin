@@ -17,6 +17,23 @@ export function multiply(a: number, b: number): number {
 }
 
 /**
+ * Configure VietmapTrackingSDK with API key and settings
+ * @param apiKey - API key for VietmapTrackingSDK
+ * @param baseURL - Optional base URL for the API
+ * @param autoUpload - Optional auto upload setting (default: true)
+ * @returns Promise<boolean> - Success status
+ */
+export async function configure(apiKey: string, baseURL?: string, autoUpload: boolean = true): Promise<boolean> {
+  try {
+    const result = await RnVietmapTrackingPlugin.configure(apiKey, baseURL, autoUpload);
+    return result;
+  } catch (error) {
+    console.error('Failed to configure VietmapTrackingSDK:', error);
+    throw error;
+  }
+}
+
+/**
  * Start GPS location tracking with specified configuration
  * @param config - Configuration for location tracking
  * @returns Promise<boolean> - Success status
@@ -113,6 +130,14 @@ export async function requestLocationPermissions(): Promise<string> {
  */
 export async function hasLocationPermissions(): Promise<boolean> {
   return RnVietmapTrackingPlugin.hasLocationPermissions();
+}
+
+/**
+ * Request always location permissions (required for background tracking)
+ * @returns Promise<string> - Permission status
+ */
+export async function requestAlwaysLocationPermissions(): Promise<string> {
+  return RnVietmapTrackingPlugin.requestAlwaysLocationPermissions();
 }
 
 /**

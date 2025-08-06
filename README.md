@@ -81,8 +81,7 @@ For advanced background processing capabilities:
 ```xml
 <key>BGTaskSchedulerPermittedIdentifiers</key>
 <array>
-    <string>com.yourapp.background-location</string>
-    <string>com.yourapp.location-sync</string>
+    <string>com.vietmaptrackingsdk.location-sync</string>
 </array>
 ```
 

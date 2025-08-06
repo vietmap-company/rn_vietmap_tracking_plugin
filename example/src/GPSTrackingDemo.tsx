@@ -19,10 +19,12 @@ import {
   addLocationUpdateListener,
   addTrackingStatusListener,
   requestLocationPermissions,
+  requestAlwaysLocationPermissions,
   hasLocationPermissions,
   updateTrackingConfig,
   turnOnAlert,
   turnOffAlert,
+  configure,
   TrackingPresets,
   LocationUtils,
   TrackingSession,
@@ -46,9 +48,7 @@ const GPSTrackingDemo = () => {
   const [customInterval, setCustomInterval] = useState('5000');
   const [customDistance, setCustomDistance] = useState('10');
   const [useCustomConfig, setUseCustomConfig] = useState(false);
-  const [forceUpdateBackground, setForceUpdateBackground] = useState(false);
   const [customBackgroundMode, setCustomBackgroundMode] = useState(false);
-  const [customForceUpdateBackground, setCustomForceUpdateBackground] = useState(false);
 
   const trackingSession = useRef(new TrackingSession());
   const locationSubscription = useRef<any>(null);
@@ -62,8 +62,18 @@ const GPSTrackingDemo = () => {
   }, []);
 
   const initializeTracking = async () => {
-    await checkPermissions();
-    setupSubscriptions();
+    try {
+      // Configure VietmapTrackingSDK with API key
+      console.log('🔧 Configuring VietmapTrackingSDK...');
+      await configure('d18c0d40c7e7b75cd287b5a0e005edbdcd8772167a4f6140', 'http://192.168.22.154:5757', true);
+      console.log('✅ VietmapTrackingSDK configured successfully');
+
+      await checkPermissions();
+      setupSubscriptions();
+    } catch (error) {
+      console.error('❌ Failed to initialize VietmapTrackingSDK:', error);
+      Alert.alert('⚠️ Initialization Error', 'Failed to configure VietmapTrackingSDK. Please check your API key.');
+    }
   };
 
   const setupSubscriptions = () => {
@@ -147,6 +157,31 @@ const GPSTrackingDemo = () => {
       return;
     }
 
+    try {
+      // Request always location permissions for background tracking
+      console.log('🔐 Requesting always location permissions...');
+      const alwaysPermissionResult = await requestAlwaysLocationPermissions();
+      console.log('🔐 Always permission result:', alwaysPermissionResult);
+
+      if (alwaysPermissionResult !== 'granted') {
+        Alert.alert(
+          '⚠️ Background Tracking',
+          'Always location permission is recommended for background tracking.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => {} },
+          ]
+        );
+        return;
+      }
+
+      await startTrackingWithConfig();
+    } catch (error) {
+      console.error('Error requesting always permissions:', error);
+      Alert.alert('❌ Error', 'Failed to request always location permissions');
+    }
+  };
+
+  const startTrackingWithConfig = async () => {
     try {
       const activeConfig = getActiveConfig();
       console.log('🚀 Starting enhanced tracking with config:', activeConfig);
@@ -366,16 +401,6 @@ const GPSTrackingDemo = () => {
             />
           </View>
 
-          {!useCustomConfig && (
-            <View style={styles.switchRow}>
-              <Text style={styles.label}>Force Update Background (Preset):</Text>
-              <Switch
-                value={forceUpdateBackground}
-                onValueChange={setForceUpdateBackground}
-              />
-            </View>
-          )}
-
           {useCustomConfig && (
             <View style={styles.customInputs}>
               <View style={styles.inputRow}>
@@ -406,14 +431,6 @@ const GPSTrackingDemo = () => {
                   onValueChange={setCustomBackgroundMode}
                 />
               </View>
-
-              <View style={styles.switchRow}>
-                <Text style={styles.label}>Force Update Background (Custom):</Text>
-                <Switch
-                  value={customForceUpdateBackground}
-                  onValueChange={setCustomForceUpdateBackground}
-                />
-              </View>
             </View>
           )}
         </View>
@@ -425,7 +442,6 @@ const GPSTrackingDemo = () => {
             Distance: {getActiveConfig().distanceFilter}m |
             Accuracy: {getActiveConfig().accuracy} |
             Background: {getActiveConfig().backgroundMode ? '✅' : '❌'} |
-            Force Update: {useCustomConfig ? (customForceUpdateBackground ? '✅' : '❌') : (forceUpdateBackground ? '✅' : '❌')}
           </Text>
         </View>
       </View>
