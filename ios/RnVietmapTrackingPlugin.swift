@@ -4,10 +4,12 @@ import React
 import UIKit
 import BackgroundTasks // Add for iOS 13+ background task scheduling
 import AVFoundation // Add for speech synthesis
+import VietmapTrackingSDK
 
 @objc(RnVietmapTrackingPlugin)
 class RnVietmapTrackingPlugin: RCTEventEmitter {
 
+    private var trackingSDK: VietmapTrackingManager?
     private var locationManager: CLLocationManager!
     private var isTracking: Bool = false
     private var trackingStartTime: TimeInterval = 0
@@ -53,7 +55,14 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
     override init() {
         super.init()
+
+        // Initialize location manager first
         locationManager = CLLocationManager()
+
+        // Setup tracking SDK
+        setupTrackingSDK()
+
+        // Configure location manager delegate
         locationManager.delegate = self
         isTracking = false
         trackingStartTime = 0
@@ -120,15 +129,9 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     @objc
     func getCurrentLocation(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
 
-        let status = locationManager.authorizationStatus
-        if status == .denied || status == .restricted {
-            reject("PERMISSION_DENIED", "Location permissions are required", nil)
-            return
-        }
-
-        if let location = locationManager.location {
-            let locationDict = locationToDictionary(location)
-            resolve(locationDict)
+        // Use VietmapTrackingSDK to get current location
+        if let location = trackingSDK?.getCurrentLocation() {
+            resolve(location)
         } else {
             reject("LOCATION_UNAVAILABLE", "Unable to get current location", nil)
         }
@@ -136,21 +139,16 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
     @objc
     func isTrackingActive(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-        resolve(isTracking)
+        // Use VietmapTrackingSDK to check tracking status
+        let isActive = trackingSDK?.isTrackingActive() ?? false
+        resolve(isActive)
     }
 
     @objc
     func getTrackingStatus(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
 
-        let currentTime = Date().timeIntervalSince1970
-        let duration = isTracking ? (currentTime - trackingStartTime) : 0
-
-        let status: [String: Any] = [
-            "isTracking": isTracking,
-            "trackingDuration": duration * 1000, // Convert to milliseconds
-            "lastLocationUpdate": lastLocationUpdate > 0 ? lastLocationUpdate * 1000 : NSNull()
-        ]
-
+        // Use VietmapTrackingSDK to get tracking status
+        let status = trackingSDK?.getTrackingStatus() ?? [:]
         resolve(status)
     }
 
@@ -176,50 +174,30 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     @objc
     func requestLocationPermissions(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
 
-        let status = locationManager.authorizationStatus
-
-        switch status {
-        case .authorizedWhenInUse, .authorizedAlways:
-            resolve("granted")
-        case .denied, .restricted:
-            resolve("denied")
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
-            resolve("pending")
-        @unknown default:
-            resolve("unknown")
+        // Use VietmapTrackingSDK to request location permissions
+        trackingSDK?.requestLocationPermissions { permission in
+            DispatchQueue.main.async {
+                resolve(permission)
+            }
         }
     }
 
     @objc
     func hasLocationPermissions(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
 
-        let status = locationManager.authorizationStatus
-        let hasPermission = (status == .authorizedWhenInUse || status == .authorizedAlways)
-
+        // Use VietmapTrackingSDK to check location permissions
+        let hasPermission = trackingSDK?.hasLocationPermissions() ?? false
         resolve(hasPermission)
     }
 
     @objc
     func requestAlwaysLocationPermissions(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
 
-        let status = locationManager.authorizationStatus
-
-        switch status {
-        case .authorizedAlways:
-            resolve("granted")
-        case .authorizedWhenInUse:
-            print("🔑 Upgrading from 'when in use' to 'always' permission")
-            locationManager.requestAlwaysAuthorization()
-            resolve("pending")
-        case .denied, .restricted:
-            resolve("denied")
-        case .notDetermined:
-            print("🔑 Requesting 'always' location permission")
-            locationManager.requestAlwaysAuthorization()
-            resolve("pending")
-        @unknown default:
-            resolve("unknown")
+        // Use VietmapTrackingSDK to request always location permissions
+        trackingSDK?.requestAlwaysLocationPermissions { permission in
+            DispatchQueue.main.async {
+                resolve(permission)
+            }
         }
     }
 
@@ -257,6 +235,62 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         if isSpeedAlertActive {
             print("🚨 Continuing speed alert in foreground mode")
             // Keep continuous updates but no need for background tasks
+        }
+    }
+
+    private func setupTrackingSDK() {
+        // Initialize VietmapTrackingManager singleton
+        trackingSDK = VietmapTrackingManager.shared
+
+        // Configure SDK with API key and enable auto upload
+        trackingSDK?.configure(apiKey: "d18c0d40c7e7b75cd287b5a0e005edbdcd8772167a4f6140")
+        // Configure SDK with alert
+        trackingSDK?.configureAlertAPI(url: "YOUR_URL_ALERT_HERE", apiKey: "YOUR_API_ALERT_HERE")
+        trackingSDK?.setAutoUpload(enabled: true)
+
+        // Set up callback handlers
+        setupTrackingSDKCallbacks()
+
+        print("✅ VietmapTrackingSDK initialized with auto-upload enabled")
+    }
+
+    private func setupTrackingSDKCallbacks() {
+        // Set up callbacks to forward events to React Native
+        trackingSDK?.onLocationUpdate = { [weak self] locationDict in
+            DispatchQueue.main.async {
+                self?.sendEvent(withName: "onLocationUpdate", body: locationDict as? [String: Any])
+            }
+        }
+
+        trackingSDK?.onTrackingStatusChanged = { [weak self] statusDict in
+            DispatchQueue.main.async {
+                self?.sendEvent(withName: "onTrackingStatusChanged", body: statusDict as? [String: Any])
+            }
+        }
+
+        trackingSDK?.onError = { [weak self] error in
+            DispatchQueue.main.async {
+                let errorInfo: [String: Any] = [
+                    "error": error,
+                    "timestamp": Date().timeIntervalSince1970 * 1000
+                ]
+                self?.sendEvent(withName: "onLocationError", body: errorInfo)
+            }
+        }
+
+        trackingSDK?.onPermissionChanged = { [weak self] status in
+            DispatchQueue.main.async {
+                let permissionInfo: [String: Any] = [
+                    "status": status,
+                    "timestamp": Date().timeIntervalSince1970 * 1000
+                ]
+                self?.sendEvent(withName: "onPermissionChanged", body: permissionInfo)
+            }
+        }
+
+        trackingSDK?.onRouteUpdate = { success, routeData in
+            // Handle route updates if needed
+            print("📍 Route update received: \(success)")
         }
     }
 
@@ -340,12 +374,17 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     private func enableDeferredLocationUpdates() {
         print("🔋 Enabling deferred location updates for battery optimization")
 
-        // Defer updates by distance or time to save battery
-        let deferredDistance: CLLocationDistance = 500 // 500 meters
-        let deferredTimeout: TimeInterval = TimeInterval(intervalMs * 2) / 1000.0 // 2x interval
+        // Only use deferred updates on iOS versions that support it
+        if #available(iOS 13.0, *) {
+            print("ℹ️ Deferred location updates deprecated in iOS 13+ - using modern background tasks instead")
+        } else {
+            // Defer updates by distance or time to save battery
+            let deferredDistance: CLLocationDistance = 500 // 500 meters
+            let deferredTimeout: TimeInterval = TimeInterval(intervalMs * 2) / 1000.0 // 2x interval
 
-        locationManager.allowDeferredLocationUpdates(untilTraveled: deferredDistance, timeout: deferredTimeout)
-        print("🔋 Deferred updates: \(deferredDistance)m or \(deferredTimeout)s")
+            locationManager.allowDeferredLocationUpdates(untilTraveled: deferredDistance, timeout: deferredTimeout)
+            print("🔋 Deferred updates: \(deferredDistance)m or \(deferredTimeout)s")
+        }
     }
 
     private func endBackgroundTask() {
@@ -355,67 +394,51 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             backgroundTaskId = .invalid
         }
 
-        // Disable deferred updates
-        locationManager.disallowDeferredLocationUpdates()
+        // Only disable deferred updates on older iOS versions
+        if #available(iOS 13.0, *) {
+            print("ℹ️ Using modern background task management for iOS 13+")
+        } else {
+            locationManager.disallowDeferredLocationUpdates()
+        }
     }
 
     @objc(startTracking:intervalMs:forceUpdateBackground:distanceFilter:resolver:rejecter:)
     func startTracking(backgroundMode: Bool, intervalMs: Int, forceUpdateBackground: Bool, distanceFilter: Double, resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        print("🚀 Starting tracking - Background mode: \(backgroundMode), Interval: \(intervalMs)ms, Force update: \(forceUpdateBackground), Distance filter: \(distanceFilter)m")
+        print("🚀 Starting tracking via VietmapTrackingSDK - Background mode: \(backgroundMode), Interval: \(intervalMs)ms, Force update: \(forceUpdateBackground), Distance filter: \(distanceFilter)m")
 
-        guard !isTracking else {
+        // Check if already tracking using VietmapTrackingSDK
+        guard !(trackingSDK?.isTrackingActive() ?? false) else {
             print("⚠️ Already tracking")
             resolver("Already tracking")
             return
         }
 
+        // Store configuration
         self.backgroundMode = backgroundMode
         self.intervalMs = intervalMs
         self.forceUpdateBackground = forceUpdateBackground
 
-        // Validate location permissions
-        let status = locationManager.authorizationStatus
-        print("📍 Current location authorization: \(status.rawValue)")
+        // Start tracking using VietmapTrackingSDK
+        trackingSDK?.startTracking(
+            enhancedBackgroundMode: backgroundMode,
+            intervalMs: intervalMs,
+            distanceFilter: distanceFilter
+        ) { [weak self] success, message in
+            DispatchQueue.main.async {
+                if success {
+                    self?.isTracking = true
+                    self?.trackingStartTime = Date().timeIntervalSince1970
+                    self?.sendTrackingStatusUpdate()
 
-        if backgroundMode && status != .authorizedAlways {
-            rejecter("PERMISSION_ERROR", "Background tracking requires 'Always' location permission", nil)
-            return
+                    let trackingMode = forceUpdateBackground ? "forced timer" : "continuous updates"
+                    resolver("Tracking started with \(trackingMode) via VietmapTrackingSDK")
+
+                    print("✅ Tracking started successfully via VietmapTrackingSDK")
+                } else {
+                    rejecter("TRACKING_START_FAILED", message ?? "Failed to start tracking", nil)
+                }
+            }
         }
-
-        if !backgroundMode && (status == .denied || status == .restricted) {
-            rejecter("PERMISSION_ERROR", "Location permission denied", nil)
-            return
-        }
-
-        // Configure location manager based on force update mode
-        if forceUpdateBackground {
-            configureLocationManagerForForcedUpdates()
-        } else {
-            configureLocationManagerForContinuousUpdates()
-            // Set distance filter only for standard mode
-            locationManager.distanceFilter = distanceFilter
-            print("📏 Distance filter set to: \(distanceFilter)m")
-        }
-
-        isTracking = true
-        trackingStartTime = Date().timeIntervalSince1970
-
-        if forceUpdateBackground {
-            print("🔄 Starting forced location updates with timer")
-            startLocationTimer()
-        } else {
-            print("🔄 Starting continuous location updates")
-            locationManager.startUpdatingLocation()
-        }
-
-        // If already in background, start background task chain
-        if isInBackground {
-            startBackgroundLocationTracking()
-        }
-
-        sendTrackingStatusUpdate()
-        let trackingMode = forceUpdateBackground ? "forced timer" : "continuous updates"
-        resolver("Tracking started with \(trackingMode)")
     }
 
     private func configureLocationManagerForContinuousUpdates() {
@@ -500,39 +523,31 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
     @objc(stopTracking:rejecter:)
     func stopTracking(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        print("🛑 Stopping tracking")
+        print("🛑 Stopping tracking via VietmapTrackingSDK")
 
-        guard isTracking else {
+        // Check if tracking is active using VietmapTrackingSDK
+        guard trackingSDK?.isTrackingActive() ?? false else {
             print("⚠️ Not currently tracking")
             resolver("Not tracking")
             return
         }
 
-        isTracking = false
+        // Stop tracking using VietmapTrackingSDK
+        trackingSDK?.stopTracking { [weak self] success, message in
+            DispatchQueue.main.async {
+                if success {
+                    self?.isTracking = false
+                    self?.backgroundMode = false
+                    self?.forceUpdateBackground = false
+                    self?.sendTrackingStatusUpdate()
 
-        // Stop all location services
-        locationManager.stopUpdatingLocation()
-        locationManager.stopMonitoringSignificantLocationChanges()
-        locationManager.disallowDeferredLocationUpdates()
-
-        // Stop timer if in forced mode
-        if forceUpdateBackground {
-            stopLocationTimer()
+                    print("✅ Tracking stopped successfully via VietmapTrackingSDK")
+                    resolver("Tracking stopped")
+                } else {
+                    rejecter("TRACKING_STOP_FAILED", message ?? "Failed to stop tracking", nil)
+                }
+            }
         }
-
-        // Disable background location updates safely
-        if backgroundMode && locationManager.authorizationStatus == .authorizedAlways {
-            locationManager.allowsBackgroundLocationUpdates = false
-        }
-
-        // End background task
-        endBackgroundTask()
-
-        backgroundMode = false
-        forceUpdateBackground = false
-        sendTrackingStatusUpdate()
-        print("✅ Tracking stopped")
-        resolver("Tracking stopped")
     }
 
     private func getAccuracyFromString(_ accuracy: String) -> CLLocationAccuracy {
@@ -944,46 +959,20 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     @objc(turnOnAlert:rejecter:)
     func turnOnAlert(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        print("🚨 Turning on speed alert")
+        print("🚨 Turning on speed alert via VietmapTrackingSDK")
 
-        // Check current location permission status
-        let authorizationStatus = locationManager.authorizationStatus
-        print("🔒 Current location permission status: \(authorizationStatus.rawValue)")
-
-        switch authorizationStatus {
-        case .notDetermined:
-            print("📱 Location permission not determined, requesting Always permission for background...")
-            // Store the resolver to call it after permission is granted/denied
-            self.pendingAlertResolver = resolver
-            self.pendingAlertRejecter = rejecter
-            // Request Always permission for background location
-            locationManager.requestAlwaysAuthorization()
-            return
-
-        case .authorizedWhenInUse:
-            print("📱 Have When In Use permission, requesting Always permission for background...")
-            // Store the resolver to call it after permission is granted/denied
-            self.pendingAlertResolver = resolver
-            self.pendingAlertRejecter = rejecter
-            // Upgrade to Always permission for background location
-            locationManager.requestAlwaysAuthorization()
-            return
-
-        case .denied, .restricted:
-            print("❌ Location permission denied or restricted")
-            resolver(false)
-            return
-
-        case .authorizedAlways:
-            print("✅ Location permission granted (Always), starting background monitoring for speed alert")
-            startSpeedAlertLocationMonitoring()
-            resolver(true)
-            return
-
-        @unknown default:
-            print("❓ Unknown permission status")
-            resolver(false)
-            return
+        // Use VietmapTrackingSDK to turn on speed alert
+        trackingSDK?.turnOnAlert { [weak self] success in
+            DispatchQueue.main.async {
+                if success {
+                    self?.isSpeedAlertActive = true
+                    print("✅ Speed alert turned on successfully via VietmapTrackingSDK")
+                    resolver(true)
+                } else {
+                    print("❌ Failed to turn on speed alert")
+                    resolver(false)
+                }
+            }
         }
     }
 
@@ -1049,7 +1038,13 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
         if !isTracking {
             locationManager.stopUpdatingLocation()
             locationManager.stopMonitoringSignificantLocationChanges()
-            locationManager.disallowDeferredLocationUpdates()
+
+            // Only disable deferred updates on older iOS versions
+            if #available(iOS 13.0, *) {
+                print("ℹ️ Using modern background task management for iOS 13+")
+            } else {
+                locationManager.disallowDeferredLocationUpdates()
+            }
 
             // Disable background location updates
             if locationManager.authorizationStatus == .authorizedAlways {
@@ -1067,9 +1062,21 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     @objc(turnOffAlert:rejecter:)
     func turnOffAlert(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        print("🛑 Turning off speed alert")
-        stopSpeedAlertLocationMonitoring()
-        resolver(true)
+        print("🛑 Turning off speed alert via VietmapTrackingSDK")
+
+        // Use VietmapTrackingSDK to turn off speed alert
+        trackingSDK?.turnOffAlert { [weak self] success in
+            DispatchQueue.main.async {
+                if success {
+                    self?.isSpeedAlertActive = false
+                    print("✅ Speed alert turned off successfully via VietmapTrackingSDK")
+                    resolver(true)
+                } else {
+                    print("❌ Failed to turn off speed alert")
+                    resolver(false)
+                }
+            }
+        }
     }
 
     // MARK: - Route and Alert Processing Methods
@@ -1107,7 +1114,7 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
                 let processedAlert: [String: Any] = [
                     "type": alert[0],
                     "subtype": alert[1],
-                    "speedLimit": alert[2] ?? NSNull(),
+                    "speedLimit": alert[2] as Any,
                     "distance": alert[3]
                 ]
                 processedAlerts.append(processedAlert)
@@ -1125,8 +1132,9 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
 
     @objc(getCurrentRouteInfo:rejecter:)
     func getCurrentRouteInfo(resolver: @escaping RCTPromiseResolveBlock, rejecter: @escaping RCTPromiseRejectBlock) {
-        if let routeData = currentRouteData {
-            resolver(routeData)
+        // Use VietmapTrackingSDK to get current route info
+        if let routeInfo = trackingSDK?.getCurrentRouteInfo() {
+            resolver(routeInfo)
         } else {
             rejecter("NO_ROUTE_DATA", "No route data available", nil)
         }
@@ -1221,7 +1229,7 @@ extension RnVietmapTrackingPlugin: CLLocationManagerDelegate {
                 let alertInfo: [String: Any] = [
                     "type": alert[0],
                     "subtype": alert[1],
-                    "speedLimit": alert[2] ?? NSNull(),
+                    "speedLimit": alert[2] as Any,
                     "distance": distance,
                     "linkIndex": linkIndex
                 ]
