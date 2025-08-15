@@ -1,6 +1,6 @@
 # RN VietMap Tracking Plugin
 
-[![npm version](https://badge.fury.io/js/rn_vietmap_tracking_plugin.svg)](https://badge.fury.io/js/rn_vietmap_tracking_plugin)
+[![npm version](https://badge.fury.io/js/@vietmap/rn_vietmap_tracking_plugin.svg)](https://badge.fury.io/js/@vietmap/rn_vietmap_tracking_plugin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A comprehensive React Native library for GPS location tracking with advanced background support, optimized for the latest React Native versions and built with TypeScript. Features the **background_location_2 strategy** with **Force Update Background Mode** for reliable continuous tracking even when the app is minimized.
@@ -43,7 +43,7 @@ await startTracking(true, 60000, false, 100); // 1min intervals, 100m distance f
 ## 📦 Installation
 
 ```bash
-npm install rn_vietmap_tracking_plugin
+npm install @vietmap/rn_vietmap_tracking_plugin
 ```
 
 ### iOS Setup
@@ -119,7 +119,7 @@ For enhanced background tracking, add the location service to your manifest:
 ### Basic Usage
 
 ```typescript
-import { startTracking, stopTracking, addLocationUpdateListener } from 'rn_vietmap_tracking_plugin';
+import { startTracking, stopTracking, addLocationUpdateListener } from '@vietmap/rn_vietmap_tracking_plugin';
 
 // Start basic tracking
 const startBasicTracking = async () => {

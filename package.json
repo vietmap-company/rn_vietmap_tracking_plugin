@@ -1,5 +1,5 @@
 {
-  "name": "rn_vietmap_tracking_plugin",
+  "name": "@vietmap/rn_vietmap_tracking_plugin",
   "version": "0.1.0",
   "description": "A React Native VietMap library for background GPS location tracking",
   "main": "./lib/module/index.js",
@@ -32,7 +32,7 @@
     "!**/.*"
   ],
   "scripts": {
-    "example": "yarn workspace rn_vietmap_tracking_plugin-example",
+    "example": "yarn workspace @vietmap/rn_vietmap_tracking_plugin-example",
     "test": "jest",
     "typecheck": "tsc",
     "typescript": "tsc --noEmit",

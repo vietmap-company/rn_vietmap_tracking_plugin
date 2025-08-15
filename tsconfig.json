@@ -2,7 +2,7 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "rn_vietmap_tracking_plugin": ["./src/index"]
+      "@vietmap/rn_vietmap_tracking_plugin": ["./src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,

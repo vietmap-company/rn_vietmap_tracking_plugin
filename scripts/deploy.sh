@@ -34,8 +34,8 @@ fi
 
 # Check if package name is correct
 PACKAGE_NAME=$(node -p "require('./package.json').name")
-if [ "$PACKAGE_NAME" != "rn_vietmap_tracking_plugin" ]; then
-    print_error "Package name mismatch. Expected 'rn_vietmap_tracking_plugin', got '$PACKAGE_NAME'"
+if [ "$PACKAGE_NAME" != "@vietmap/rn_vietmap_tracking_plugin" ]; then
+    print_error "Package name mismatch. Expected '@vietmap/rn_vietmap_tracking_plugin', got '$PACKAGE_NAME'"
     exit 1
 fi
 
@@ -180,7 +180,7 @@ echo "2. Using release-it: npm run release"
 echo
 echo "To test locally:"
 echo "1. Create tarball: npm pack"
-echo "2. Install in test project: npm install ../path/to/rn_vietmap_tracking_plugin-$NEW_VERSION.tgz"
+echo "2. Install in test project: npm install ../path/to/vietmap-rn_vietmap_tracking_plugin-$NEW_VERSION.tgz"
 echo
 
 # Ask if user wants to publish now

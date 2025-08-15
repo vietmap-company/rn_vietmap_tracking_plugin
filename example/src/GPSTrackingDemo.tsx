@@ -27,13 +27,12 @@ import {
   configureAlertAPI,
   turnOnAlert,
   turnOffAlert,
-  TrackingPresets,
   LocationUtils,
   TrackingSession,
   type LocationData,
   type TrackingStatus,
   type LocationTrackingConfig,
-} from 'rn_vietmap_tracking_plugin';
+} from '@vietmap/rn_vietmap_tracking_plugin';
 
 const GPSTrackingDemo = () => {
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
@@ -45,8 +44,17 @@ const GPSTrackingDemo = () => {
   // Speed Alert state (native speech synthesis only - no event data to display)
   const [isSpeedAlertEnabled, setIsSpeedAlertEnabled] = useState(false);
 
-  // Configuration state
-  const [config, setConfig] = useState<LocationTrackingConfig>(TrackingPresets.GENERAL);
+  // Default configuration
+  const defaultConfig: LocationTrackingConfig = {
+    intervalMs: 5000,
+    distanceFilter: 10,
+    accuracy: 'high',
+    backgroundMode: true,
+    notificationTitle: 'GPS Tracking',
+    notificationMessage: 'Your location is being tracked'
+  };
+
+  // Configuration state - only custom config needed now
   const [customInterval, setCustomInterval] = useState('5000');
   const [customDistance, setCustomDistance] = useState('10');
   const [useCustomConfig, setUseCustomConfig] = useState(false);
@@ -165,13 +173,13 @@ const GPSTrackingDemo = () => {
       return {
         intervalMs: parseInt(customInterval) || 5000,
         distanceFilter: parseInt(customDistance) || 10,
-        accuracy: config.accuracy,
+        accuracy: defaultConfig.accuracy,
         backgroundMode: customBackgroundMode,
-        notificationTitle: config.notificationTitle,
-        notificationMessage: config.notificationMessage,
+        notificationTitle: defaultConfig.notificationTitle,
+        notificationMessage: defaultConfig.notificationMessage,
       };
     }
-    return config;
+    return defaultConfig;
   };
 
   const handleStartTracking = async () => {
@@ -362,17 +370,6 @@ const GPSTrackingDemo = () => {
     }
   };
 
-  const PresetButton = ({ preset, name, onPress }: any) => (
-    <TouchableOpacity
-      style={[styles.presetButton, config === preset && styles.activePreset]}
-      onPress={onPress}
-    >
-      <Text style={[styles.presetButtonText, config === preset && styles.activePresetText]}>
-        {name}
-      </Text>
-    </TouchableOpacity>
-  );
-
   return (
     <ScrollView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
@@ -423,32 +420,6 @@ const GPSTrackingDemo = () => {
       {/* Configuration Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>⚙️ Configuration</Text>
-
-        <View style={styles.presetContainer}>
-          <Text style={styles.label}>Presets:</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <PresetButton
-              preset={TrackingPresets.NAVIGATION}
-              name="Navigation"
-              onPress={() => setConfig(TrackingPresets.NAVIGATION)}
-            />
-            <PresetButton
-              preset={TrackingPresets.FITNESS}
-              name="Fitness"
-              onPress={() => setConfig(TrackingPresets.FITNESS)}
-            />
-            <PresetButton
-              preset={TrackingPresets.GENERAL}
-              name="General"
-              onPress={() => setConfig(TrackingPresets.GENERAL)}
-            />
-            <PresetButton
-              preset={TrackingPresets.BATTERY_SAVER}
-              name="Battery Saver"
-              onPress={() => setConfig(TrackingPresets.BATTERY_SAVER)}
-            />
-          </ScrollView>
-        </View>
 
         <View style={styles.customConfigContainer}>
           <View style={styles.switchRow}>
@@ -700,31 +671,11 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     color: '#2c3e50',
   },
-  presetContainer: {
-    marginBottom: 15,
-  },
   label: {
     fontSize: 16,
     fontWeight: '600',
     color: '#495057',
     marginBottom: 8,
-  },
-  presetButton: {
-    backgroundColor: '#e9ecef',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 10,
-  },
-  activePreset: {
-    backgroundColor: '#007bff',
-  },
-  presetButtonText: {
-    fontSize: 14,
-    color: '#495057',
-  },
-  activePresetText: {
-    color: '#fff',
   },
   customConfigContainer: {
     marginBottom: 15,
