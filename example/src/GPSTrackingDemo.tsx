@@ -23,9 +23,10 @@ import {
   hasLocationPermissions,
   updateTrackingConfig,
   getTrackingStatus,
+  configure,
+  configureAlertAPI,
   turnOnAlert,
   turnOffAlert,
-  configure,
   TrackingPresets,
   LocationUtils,
   TrackingSession,
@@ -66,8 +67,13 @@ const GPSTrackingDemo = () => {
     try {
       // Configure VietmapTrackingSDK with API key
       console.log('🔧 Configuring VietmapTrackingSDK...');
-      await configure('d18c0d40c7e7b75cd287b5a0e005edbdcd8772167a4f6140', 'http://192.168.22.154:5757', true);
+      await configure('YOUR_API_KEY_HERE', 'YOUR_BASE_URL_HERE', true);
       console.log('✅ VietmapTrackingSDK configured successfully');
+
+      // Configure Alert API
+      console.log('🚨 Configuring Alert API...');
+      await configureAlertAPI('YOUR_BASE_URL_HERE', 'YOUR_ALERT_API_KEY_HERE');
+      console.log('✅ Alert API configured successfully');
 
       await checkPermissions();
       await checkTrackingStatus();

@@ -7,6 +7,7 @@ export interface Spec extends TurboModule {
 
   // Configuration methods
   configure(apiKey: string, baseURL?: string, autoUpload?: boolean): Promise<boolean>;
+  configureAlertAPI(url: string, apiKey: string): Promise<boolean>;
 
   // Enhanced tracking methods for background_location_2 strategy
   startTracking(backgroundMode: boolean, intervalMs: number, forceUpdateBackground?: boolean, distanceFilter?: number): Promise<string>;

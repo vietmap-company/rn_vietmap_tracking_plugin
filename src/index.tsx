@@ -63,6 +63,22 @@ export async function configure(apiKey: string, baseURL?: string, autoUpload: bo
 }
 
 /**
+ * Configure Alert API for speed alerts
+ * @param url - Alert API URL
+ * @param apiKey - API key for Alert API
+ * @returns Promise<boolean> - Success status
+ */
+export async function configureAlertAPI(url: string, apiKey: string): Promise<boolean> {
+  try {
+    const result = await RnVietmapTrackingPlugin.configureAlertAPI(url, apiKey);
+    return result;
+  } catch (error) {
+    console.error('Failed to configure Alert API:', error);
+    throw error;
+  }
+}
+
+/**
  * Start GPS location tracking with specified configuration
  * @param config - Configuration for location tracking
  * @returns Promise<boolean> - Success status

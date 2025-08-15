@@ -142,6 +142,28 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun configureAlertAPI(url: String, apiKey: String, promise: Promise) {
+    if (!isInitialized) {
+      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
+      return
+    }
+
+    Log.d(NAME, "🚨 Configuring Alert API: $url")
+
+    try {
+      // Configure alert API with VietmapTrackingSDK
+      vietmapSDK.configureAlertAPI(url, apiKey)
+
+      Log.d(NAME, "✅ Alert API configured successfully")
+      promise.resolve(true)
+
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Failed to configure Alert API: ${e.message}", e)
+      promise.reject("ALERT_CONFIG_FAILED", "Failed to configure Alert API: ${e.message}")
+    }
+  }
+
+  @ReactMethod
   fun requestLocationPermissions(promise: Promise) {
     Log.d(NAME, "🔍 Requesting location permissions for VietmapTrackingSDK")
 
@@ -601,6 +623,61 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // MARK: - Alert Management Methods
+  @ReactMethod
+  fun turnOnAlert(promise: Promise) {
+    if (!isInitialized) {
+      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
+      return
+    }
+
+    Log.d(NAME, "🚨 Turning on speed alert via VietmapTrackingSDK")
+
+    try {
+      // Turn on alert with VietmapTrackingSDK
+      val success = vietmapSDK.startAlert()
+
+      if (success) {
+        Log.d(NAME, "✅ Speed alert turned on successfully")
+        promise.resolve(true)
+      } else {
+        Log.w(NAME, "❌ Failed to turn on speed alert")
+        promise.resolve(false)
+      }
+
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Failed to turn on speed alert: ${e.message}", e)
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun turnOffAlert(promise: Promise) {
+    if (!isInitialized) {
+      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
+      return
+    }
+
+    Log.d(NAME, "🛑 Turning off speed alert via VietmapTrackingSDK")
+
+    try {
+      // Turn off alert with VietmapTrackingSDK
+      val success = vietmapSDK.stopAlert()
+
+      if (success) {
+        Log.d(NAME, "✅ Speed alert turned off successfully")
+        promise.resolve(true)
+      } else {
+        Log.w(NAME, "❌ Failed to turn off speed alert")
+        promise.resolve(false)
+      }
+
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Failed to turn off speed alert: ${e.message}", e)
+      promise.resolve(false)
+    }
+  }
+
   // MARK: - Route Data Methods
   @ReactMethod
   fun setRouteData(routeJsonString: String, promise: Promise) {
@@ -661,6 +738,35 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       }
     }
     Log.d(NAME, "🔄 Module invalidated and cleaned up")
+  }
+
+  // MARK: - Legacy Support Methods (kept for backward compatibility)
+  @ReactMethod
+  fun findNearestAlert(latitude: Double, longitude: Double, promise: Promise) {
+    if (!isInitialized) {
+      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
+      return
+    }
+
+    Log.d(NAME, "🔍 Finding nearest alert for coordinates: ($latitude, $longitude)")
+
+    try {
+      // This method is now handled internally by VietmapTrackingSDK
+      // We delegate to route data for route-related alert information
+      val alertInfo = Arguments.createMap().apply {
+        putDouble("latitude", latitude)
+        putDouble("longitude", longitude)
+        putString("routeInfo", "Alert data handled by VietmapTrackingSDK")
+        putDouble("timestamp", System.currentTimeMillis().toDouble())
+      }
+
+      Log.d(NAME, "✅ Alert info prepared")
+      promise.resolve(alertInfo)
+
+    } catch (e: Exception) {
+      Log.e(NAME, "❌ Failed to find nearest alert: ${e.message}", e)
+      promise.reject("NO_ROUTE_DATA", "No route data available for alert calculation")
+    }
   }
 
   companion object {
