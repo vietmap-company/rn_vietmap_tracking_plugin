@@ -22,6 +22,7 @@ import {
   requestAlwaysLocationPermissions,
   hasLocationPermissions,
   updateTrackingConfig,
+  getTrackingStatus,
   turnOnAlert,
   turnOffAlert,
   configure,
@@ -69,6 +70,7 @@ const GPSTrackingDemo = () => {
       console.log('✅ VietmapTrackingSDK configured successfully');
 
       await checkPermissions();
+      await checkTrackingStatus();
       setupSubscriptions();
     } catch (error) {
       console.error('❌ Failed to initialize VietmapTrackingSDK:', error);
@@ -118,6 +120,21 @@ const GPSTrackingDemo = () => {
       console.log('🔒 Permissions status:', permissions);
     } catch (error) {
       console.error('Error checking permissions:', error);
+    }
+  };
+
+  const checkTrackingStatus = async () => {
+    try {
+      console.log('📊 Checking tracking status...');
+      const status = await getTrackingStatus();
+      console.log('📊 Current tracking status:', status);
+
+      // Update tracking state based on actual SDK status
+      setIsTracking(status.isTracking);
+    } catch (error) {
+      console.error('Error checking tracking status:', error);
+      // Fallback to false if we can't determine the status
+      setIsTracking(false);
     }
   };
 
@@ -190,11 +207,31 @@ const GPSTrackingDemo = () => {
       const result = await startTracking(activeConfig);
       console.log('✅ Enhanced tracking result:', result);
 
-      trackingSession.current.start();
-      Alert.alert('✅ Success', 'Enhanced GPS tracking started');
+      // Check if tracking started successfully
+      const resultStr = String(result || '');
+      if (result && (
+        resultStr.includes('tracking') && resultStr.includes('started') ||
+        result === 'success' ||
+        resultStr.includes('success')
+      )) {
+        // Update tracking state immediately after successful start
+        setIsTracking(true);
+
+        trackingSession.current.start();
+        Alert.alert('✅ Success', 'Enhanced GPS tracking started');
+      } else {
+        console.warn('⚠️ Tracking may not have started successfully:', result);
+        Alert.alert('⚠️ Warning', 'Tracking started but result unclear');
+
+        // Double-check the actual status after a short delay
+        setTimeout(async () => {
+          await checkTrackingStatus();
+        }, 1000);
+      }
     } catch (error) {
       console.error('Error starting enhanced tracking:', error);
       Alert.alert('❌ Error', 'Failed to start enhanced tracking');
+      setIsTracking(false);
     }
   };
 
@@ -203,12 +240,27 @@ const GPSTrackingDemo = () => {
       const result = await stopTracking();
       console.log('✅ Enhanced tracking stopped:', result);
 
-      trackingSession.current.clear();
-      setSessionStats(null);
-      Alert.alert('✅ Success', 'Enhanced GPS tracking stopped');
+      // Check if tracking stopped successfully
+      if (result && (result === 'success' || result.includes('stopped') || result.includes('success'))) {
+        // Update tracking state immediately after successful stop
+        setIsTracking(false);
+
+        trackingSession.current.clear();
+        setSessionStats(null);
+        Alert.alert('✅ Success', 'Enhanced GPS tracking stopped');
+      } else {
+        console.warn('⚠️ Tracking may not have stopped successfully:', result);
+        Alert.alert('⚠️ Warning', 'Tracking stopped but result unclear');
+
+        // Double-check the actual status after a short delay
+        setTimeout(async () => {
+          await checkTrackingStatus();
+        }, 1000);
+      }
     } catch (error) {
       console.error('Error stopping enhanced tracking:', error);
       Alert.alert('❌ Error', 'Failed to stop enhanced tracking');
+      // Don't update state on error, keep current state
     }
   };
 
@@ -486,12 +538,21 @@ const GPSTrackingDemo = () => {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={[styles.button, styles.clearButton]}
-          onPress={handleClearHistory}
-        >
-          <Text style={styles.buttonText}>🗑️ Clear History</Text>
-        </TouchableOpacity>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={[styles.button]}
+            onPress={checkTrackingStatus}
+          >
+            <Text style={styles.buttonText}>🔄 Refresh Status</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.button, styles.clearButton]}
+            onPress={handleClearHistory}
+          >
+            <Text style={styles.buttonText}>🗑️ Clear History</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Current Location Section */}
