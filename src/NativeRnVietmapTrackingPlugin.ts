@@ -1,5 +1,6 @@
 import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
+import type { PermissionResult } from './types';
 
 export interface Spec extends TurboModule {
   multiply(a: number, b: number): number;
@@ -18,9 +19,9 @@ export interface Spec extends TurboModule {
   // Configuration methods
   updateTrackingConfig(config: Object): Promise<boolean>;
 
-  // Permission methods
-  requestLocationPermissions(): Promise<string>;
-  hasLocationPermissions(): Promise<boolean>;
+  // Permission methods - Updated to return PermissionResult
+  requestLocationPermissions(): Promise<PermissionResult>;
+  hasLocationPermissions(): Promise<PermissionResult>;
   requestAlwaysLocationPermissions(): Promise<string>;
 
   // Speed alert methods

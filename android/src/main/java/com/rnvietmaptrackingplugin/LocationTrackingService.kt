@@ -10,18 +10,22 @@ import com.google.android.gms.location.*
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import com.vietmap.trackingsdk.*
 
+/**
+ * LocationTrackingService - Wrapper service that integrates with VietmapTrackingSDK
+ * This service primarily serves as a bridge between React Native and the VietmapTrackingSDK's internal services
+ */
 class LocationTrackingService : Service() {
 
-    private var fusedLocationClient: FusedLocationProviderClient? = null
-    private var locationRequest: LocationRequest? = null
-    private var locationCallback: LocationCallback? = null
+    private var trackingManager: VietmapTrackingManager? = null
     private val binder = LocationBinder()
 
     companion object {
         private const val NOTIFICATION_ID = 12345
         private const val CHANNEL_ID = "location_tracking_channel"
         private const val CHANNEL_NAME = "GPS Tracking"
+        private const val TAG = "LocationTrackingService"
     }
 
     inner class LocationBinder : Binder() {
@@ -30,11 +34,17 @@ class LocationTrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        android.util.Log.d(TAG, "🚀 LocationTrackingService created - integrating with VietmapTrackingSDK")
+
+        // Initialize VietmapTrackingManager
+        trackingManager = VietmapTrackingManager.getInstance(this)
+
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        android.util.Log.d(TAG, "📱 LocationTrackingService onStartCommand")
+
         val config = intent?.getBundleExtra("config")
 
         val notificationTitle = config?.getString("notificationTitle") ?: "GPS Tracking Active"
@@ -43,7 +53,8 @@ class LocationTrackingService : Service() {
         val notification = createNotification(notificationTitle, notificationMessage)
         startForeground(NOTIFICATION_ID, notification)
 
-        config?.let { setupLocationTracking(it) }
+        // Let VietmapTrackingSDK handle the actual location tracking
+        android.util.Log.d(TAG, "✅ Foreground service started, VietmapTrackingSDK will handle location tracking")
 
         return START_STICKY
     }
@@ -54,7 +65,9 @@ class LocationTrackingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopLocationTracking()
+        android.util.Log.d(TAG, "🛑 LocationTrackingService destroyed")
+
+        // VietmapTrackingSDK will handle cleanup of its own services
     }
 
     private fun createNotificationChannel() {
@@ -85,64 +98,10 @@ class LocationTrackingService : Service() {
             .build()
     }
 
-    private fun setupLocationTracking(config: Bundle) {
-        val intervalMs = config.getLong("intervalMs", 5000)
-        val distanceFilter = config.getDouble("distanceFilter", 10.0).toFloat()
-        val accuracy = config.getString("accuracy", "high")
-
-        locationRequest = LocationRequest.create().apply {
-            interval = intervalMs
-            fastestInterval = intervalMs / 2
-            smallestDisplacement = distanceFilter
-            priority = when (accuracy) {
-                "high" -> LocationRequest.PRIORITY_HIGH_ACCURACY
-                "medium" -> LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY
-                "low" -> LocationRequest.PRIORITY_LOW_POWER
-                else -> LocationRequest.PRIORITY_HIGH_ACCURACY
-            }
-        }
-
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                locationResult.lastLocation?.let { location ->
-                    handleLocationUpdate(location)
-                }
-            }
-        }
-
-        startLocationUpdates()
-    }
-
-    private fun startLocationUpdates() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            locationRequest?.let { request ->
-                locationCallback?.let { callback ->
-                    fusedLocationClient?.requestLocationUpdates(
-                        request,
-                        callback,
-                        Looper.getMainLooper()
-                    )
-                }
-            }
-        }
-    }
-
-    private fun stopLocationTracking() {
-        locationCallback?.let {
-            fusedLocationClient?.removeLocationUpdates(it)
-        }
-    }
-
-    private fun handleLocationUpdate(location: Location) {
-        // Send location update via broadcast or save to local storage
-        val intent = Intent("com.rnvietmaptrackingplugin.LOCATION_UPDATE")
-        intent.putExtra("latitude", location.latitude)
-        intent.putExtra("longitude", location.longitude)
-        intent.putExtra("altitude", location.altitude)
-        intent.putExtra("accuracy", location.accuracy)
-        intent.putExtra("speed", location.speed)
-        intent.putExtra("bearing", location.bearing)
-        intent.putExtra("timestamp", location.time)
-        sendBroadcast(intent)
+    /**
+     * Get the tracking manager instance for direct access if needed
+     */
+    fun getTrackingManager(): VietmapTrackingManager? {
+        return trackingManager
     }
 }

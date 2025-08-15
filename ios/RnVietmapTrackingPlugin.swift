@@ -211,7 +211,15 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     ) {
         trackingManager.requestLocationPermissions { status in
             DispatchQueue.main.async {
-                resolve(status)
+                // Convert status string to PermissionResult object to match Android implementation
+                let permissionResult: [String: Any] = [
+                    "granted": status == "granted",
+                    "status": status,
+                    "fineLocation": status == "granted",
+                    "coarseLocation": status == "granted",
+                    "backgroundLocation": status == "granted" // iOS manages this differently
+                ]
+                resolve(permissionResult)
             }
         }
     }
@@ -222,7 +230,17 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         rejecter reject: @escaping RCTPromiseRejectBlock
     ) {
         let hasPermission = trackingManager.hasLocationPermissions()
-        resolve(hasPermission)
+
+        // Convert boolean to PermissionResult object to match Android implementation
+        let permissionResult: [String: Any] = [
+            "granted": hasPermission,
+            "status": hasPermission ? "granted" : "not_granted",
+            "fineLocation": hasPermission,
+            "coarseLocation": hasPermission,
+            "backgroundLocation": hasPermission
+        ]
+
+        resolve(permissionResult)
     }
 
     @objc

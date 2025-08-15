@@ -7,6 +7,7 @@ import type {
   TrackingStatus,
   LocationUpdateCallback,
   TrackingStatusCallback,
+  PermissionResult,
 } from './types';
 
 // Event emitter for location updates
@@ -14,6 +15,34 @@ const eventEmitter = new NativeEventEmitter(NativeModules.RnVietmapTrackingPlugi
 
 export function multiply(a: number, b: number): number {
   return RnVietmapTrackingPlugin.multiply(a, b);
+}
+
+/**
+ * Request location permissions
+ * @returns Promise<PermissionResult> - Permission result with detailed status
+ */
+export async function requestLocationPermissions(): Promise<PermissionResult> {
+  try {
+    const result = await RnVietmapTrackingPlugin.requestLocationPermissions();
+    return result;
+  } catch (error) {
+    console.error('Failed to request location permissions:', error);
+    throw error;
+  }
+}
+
+/**
+ * Check if location permissions are granted
+ * @returns Promise<PermissionResult> - Current permission status
+ */
+export async function hasLocationPermissions(): Promise<PermissionResult> {
+  try {
+    const result = await RnVietmapTrackingPlugin.hasLocationPermissions();
+    return result;
+  } catch (error) {
+    console.error('Failed to check location permissions:', error);
+    throw error;
+  }
 }
 
 /**
@@ -41,10 +70,10 @@ export async function configure(apiKey: string, baseURL?: string, autoUpload: bo
 export async function startLocationTracking(config: LocationTrackingConfig): Promise<boolean> {
   try {
     // Request permissions first
-    const hasPermission = await RnVietmapTrackingPlugin.hasLocationPermissions();
-    if (!hasPermission) {
-      const permissionResult = await RnVietmapTrackingPlugin.requestLocationPermissions();
-      if (permissionResult !== 'granted') {
+    const permissionStatus = await hasLocationPermissions();
+    if (!permissionStatus.granted) {
+      const permissionResult = await requestLocationPermissions();
+      if (!permissionResult.granted) {
         throw new Error('Location permission denied');
       }
     }
@@ -114,22 +143,6 @@ export async function getTrackingStatus(): Promise<TrackingStatus> {
  */
 export async function updateTrackingConfig(config: LocationTrackingConfig): Promise<boolean> {
   return RnVietmapTrackingPlugin.updateTrackingConfig(config);
-}
-
-/**
- * Request location permissions
- * @returns Promise<string> - Permission status
- */
-export async function requestLocationPermissions(): Promise<string> {
-  return RnVietmapTrackingPlugin.requestLocationPermissions();
-}
-
-/**
- * Check if location permissions are granted
- * @returns Promise<boolean> - Permission status
- */
-export async function hasLocationPermissions(): Promise<boolean> {
-  return RnVietmapTrackingPlugin.hasLocationPermissions();
 }
 
 /**

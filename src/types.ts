@@ -48,7 +48,14 @@ export interface RouteAlert {
   type: number;
   subtype?: number;
   speedLimit?: number;
-  distance: number;
+}
+
+export interface PermissionResult {
+  granted: boolean;
+  status: 'granted' | 'denied' | 'not_granted';
+  fineLocation?: boolean;
+  coarseLocation?: boolean;
+  backgroundLocation?: boolean;
 }
 
 export interface ProcessedRouteData {

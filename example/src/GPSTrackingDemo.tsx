@@ -114,7 +114,7 @@ const GPSTrackingDemo = () => {
   const checkPermissions = async () => {
     try {
       const permissions = await hasLocationPermissions();
-      setHasPermissions(permissions);
+      setHasPermissions(permissions.granted);
       console.log('🔒 Permissions status:', permissions);
     } catch (error) {
       console.error('Error checking permissions:', error);
@@ -125,7 +125,7 @@ const GPSTrackingDemo = () => {
     try {
       const result = await requestLocationPermissions();
       console.log('🔓 Permission result:', result);
-      if (result === 'granted') {
+      if (result.granted) {
         setHasPermissions(true);
         Alert.alert('✅ Success', 'Location permissions granted');
       } else {
