@@ -15,6 +15,10 @@
 @interface RCT_EXTERN_MODULE(RnVietmapTrackingPlugin, RCTEventEmitter)
 #endif
 
+// Support both naming conventions
+@interface RCT_EXTERN_MODULE(RNVietmapTrackingPlugin, RCTEventEmitter)
+@end
+
 RCT_EXTERN_METHOD(multiply:(double)a b:(double)b)
 
 // Enhanced tracking methods for background_location_2 strategy

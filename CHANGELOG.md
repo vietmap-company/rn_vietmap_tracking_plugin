@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2025-09-18
+
+### Fixed
+- Resolved final iOS TurboModule registration issues for production release
+- Fixed module naming consistency across all platforms
+- Enhanced backward compatibility with legacy module names
+- Improved error handling for TurboModule initialization failures
+
 ## [0.1.2] - 2025-09-18
 
 ### Fixed

@@ -61,6 +61,16 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         return "RnVietmapTrackingPlugin"
     }
 
+    @objc
+    static func getName() -> String {
+        return "RnVietmapTrackingPlugin"
+    }
+
+    @objc
+    override func constantsToExport() -> [AnyHashable : Any]! {
+        return [:]
+    }
+
     // MARK: - SDK Callback Setup
     private func setupSDKCallbacks() {
         // Forward all SDK events to React Native
@@ -438,3 +448,9 @@ extension RnVietmapTrackingPlugin: NativeRnVietmapTrackingPluginSpec {
     }
 }
 #endif
+
+// MARK: - Alias for backwards compatibility
+@objc(RNVietmapTrackingPlugin)
+class RNVietmapTrackingPlugin: RnVietmapTrackingPlugin {
+    // Inherits all functionality from RnVietmapTrackingPlugin
+}
