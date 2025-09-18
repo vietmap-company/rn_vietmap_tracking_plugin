@@ -34,7 +34,6 @@ class LocationTrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        android.util.Log.d(TAG, "🚀 LocationTrackingService created - integrating with VietmapTrackingSDK")
 
         // Initialize VietmapTrackingManager
         trackingManager = VietmapTrackingManager.getInstance(this)
@@ -43,7 +42,6 @@ class LocationTrackingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        android.util.Log.d(TAG, "📱 LocationTrackingService onStartCommand")
 
         val config = intent?.getBundleExtra("config")
 
@@ -54,7 +52,6 @@ class LocationTrackingService : Service() {
         startForeground(NOTIFICATION_ID, notification)
 
         // Let VietmapTrackingSDK handle the actual location tracking
-        android.util.Log.d(TAG, "✅ Foreground service started, VietmapTrackingSDK will handle location tracking")
 
         return START_STICKY
     }
@@ -65,7 +62,6 @@ class LocationTrackingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        android.util.Log.d(TAG, "🛑 LocationTrackingService destroyed")
 
         // VietmapTrackingSDK will handle cleanup of its own services
     }

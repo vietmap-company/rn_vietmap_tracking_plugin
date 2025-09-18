@@ -25,8 +25,6 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
 
         // Setup SDK callbacks to forward events to React Native
         setupSDKCallbacks()
-
-        print("✅ RnVietmapTrackingPlugin initialized with VietmapTrackingSDK")
     }
 
     deinit {
@@ -114,11 +112,9 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
     func configure(
         _ apiKey: String,
         baseURL: String?,
-        autoUpload: Bool,
         resolver: @escaping RCTPromiseResolveBlock,
         rejecter: @escaping RCTPromiseRejectBlock
     ) {
-        print("🔧 Configuring VietmapTrackingSDK with apiKey: \(apiKey)")
 
         // Configure the SDK using proper methods
         trackingManager.configure(apiKey: apiKey)
@@ -127,32 +123,25 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             trackingManager.configure(baseURL: baseURL)
         }
 
-        trackingManager.setAutoUpload(enabled: autoUpload)
+        trackingManager.setAutoUpload(enabled: true)
 
         isInitialized = true
-
-        print("✅ VietmapTrackingSDK configured successfully")
         resolver(true)
     }
 
     @objc
     func configureAlertAPI(
-        _ url: String,
-        apiKey: String,
+        _ apiKey: String,
+        apiID: String,
         resolver: @escaping RCTPromiseResolveBlock,
         rejecter: @escaping RCTPromiseRejectBlock
     ) {
-        print("🚨 Configuring Alert API: \(url)")
-
-        trackingManager.configureAlertAPI(url: url, apiKey: apiKey)
+        trackingManager.configureAlertAPI(apiKey: apiKey, apiID: apiID)
 
         currentAlertConfig = [
-            "url": url,
             "apiKey": apiKey,
             "timestamp": Date().timeIntervalSince1970 * 1000
         ]
-
-        print("✅ Alert API configured successfully")
         resolver(true)
     }
 
@@ -251,17 +240,13 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         let locationManager = CLLocationManager()
         let currentStatus = locationManager.authorizationStatus
 
-        print("🔐 Current location authorization status: \(currentStatus.rawValue)")
-
         // Check current authorization status
         switch currentStatus {
         case .authorizedAlways:
-            print("✅ Always location permission already granted")
             resolve("granted")
             return
 
         case .authorizedWhenInUse:
-            print("🔄 Requesting upgrade from WhenInUse to Always permission")
             // Request always permission when currently has when-in-use
             locationManager.requestAlwaysAuthorization()
 
@@ -270,22 +255,17 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
                 let newStatus = CLLocationManager().authorizationStatus
                 switch newStatus {
                 case .authorizedAlways:
-                    print("✅ Successfully upgraded to Always permission")
                     resolve("granted")
                 case .authorizedWhenInUse:
-                    print("⚠️ User chose to keep WhenInUse permission")
                     resolve("when_in_use")
                 case .denied:
-                    print("❌ Permission denied")
                     resolve("denied")
                 default:
-                    print("🤔 Permission status: \(newStatus.rawValue)")
                     resolve("denied")
                 }
             }
 
         case .notDetermined:
-            print("🔄 Requesting Always location permission for the first time")
             // Request always permission directly
             locationManager.requestAlwaysAuthorization()
 
@@ -294,38 +274,33 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
                 let newStatus = CLLocationManager().authorizationStatus
                 switch newStatus {
                 case .authorizedAlways:
-                    print("✅ Always permission granted")
                     resolve("granted")
                 case .authorizedWhenInUse:
-                    print("⚠️ User granted WhenInUse instead of Always")
                     resolve("when_in_use")
                 case .denied:
-                    print("❌ Permission denied")
                     resolve("denied")
                 default:
-                    print("🤔 Permission status: \(newStatus.rawValue)")
                     resolve("denied")
                 }
             }
 
         case .denied, .restricted:
-            print("❌ Location permission denied or restricted")
             resolve("denied")
 
         @unknown default:
-            print("🤔 Unknown authorization status: \(currentStatus.rawValue)")
             resolve("denied")
         }
     }
 
     // MARK: - Tracking Control Methods
 
-    @objc(startTracking:intervalMs:forceUpdateBackground:distanceFilter:resolver:rejecter:)
+    @objc(startTracking:intervalMs:distanceFilter:notificationTitle:notificationMessage:resolver:rejecter:)
     func startTracking(
         backgroundMode: Bool,
         intervalMs: Int,
-        forceUpdateBackground: Bool,
         distanceFilter: Double,
+        notificationTitle: String?,
+        notificationMessage: String?,
         resolver: @escaping RCTPromiseResolveBlock,
         rejecter: @escaping RCTPromiseRejectBlock
     ) {
@@ -334,49 +309,26 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
             return
         }
 
-        print("🚀 Starting tracking via VietmapTrackingSDK")
-        print("  - Background mode: \(backgroundMode)")
-        print("  - Interval: \(intervalMs)ms")
-        print("  - Force update: \(forceUpdateBackground)")
-        print("  - Distance filter: \(distanceFilter)m")
-
         // Store tracking config for reference
         currentTrackingConfig = [
             "backgroundMode": backgroundMode,
             "intervalMs": intervalMs,
-            "forceUpdateBackground": forceUpdateBackground,
             "distanceFilter": distanceFilter,
+            "notificationTitle": notificationTitle ?? "",
+            "notificationMessage": notificationMessage ?? "",
             "timestamp": Date().timeIntervalSince1970 * 1000
         ]
 
-        // Use the appropriate SDK method based on parameters
-        if forceUpdateBackground {
-            trackingManager.startTracking(
-                backgroundMode: backgroundMode,
-                intervalMs: intervalMs,
-                forceUpdateBackground: forceUpdateBackground,
-                distanceFilter: distanceFilter
-            ) { success, message in
-                DispatchQueue.main.async {
-                    if success {
-                        resolver("Tracking started with forced background updates")
-                    } else {
-                        rejecter("TRACKING_START_FAILED", message ?? "Failed to start tracking", nil)
-                    }
-                }
-            }
-        } else {
-            trackingManager.startTracking(
-                enhancedBackgroundMode: backgroundMode,
-                intervalMs: intervalMs,
-                distanceFilter: distanceFilter
-            ) { success, message in
-                DispatchQueue.main.async {
-                    if success {
-                        resolver("Tracking started with enhanced background mode")
-                    } else {
-                        rejecter("TRACKING_START_FAILED", message ?? "Failed to start tracking", nil)
-                    }
+        trackingManager.startTracking(
+            enhancedBackgroundMode: backgroundMode,
+            intervalMs: intervalMs,
+            distanceFilter: distanceFilter
+        ) { success, message in
+            DispatchQueue.main.async {
+                if success {
+                    resolver(true)
+                } else {
+                    resolver(false)
                 }
             }
         }
@@ -387,14 +339,17 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         resolver: @escaping RCTPromiseResolveBlock,
         rejecter: @escaping RCTPromiseRejectBlock
     ) {
-        print("🛑 Stopping tracking via VietmapTrackingSDK")
+        guard isInitialized else {
+            rejecter("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized", nil)
+            return
+        }
 
         trackingManager.stopTracking { success, message in
             DispatchQueue.main.async {
                 if success {
-                    resolver("Tracking stopped successfully")
+                    resolver(true)
                 } else {
-                    rejecter("TRACKING_STOP_FAILED", message ?? "Failed to stop tracking", nil)
+                    resolver(false)
                 }
             }
         }
@@ -407,15 +362,12 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         resolver: @escaping RCTPromiseResolveBlock,
         rejecter: @escaping RCTPromiseRejectBlock
     ) {
-        print("🚨 Turning on speed alert via VietmapTrackingSDK")
 
         trackingManager.turnOnAlert { success in
             DispatchQueue.main.async {
                 if success {
-                    print("✅ Speed alert turned on successfully")
                     resolver(true)
                 } else {
-                    print("❌ Failed to turn on speed alert")
                     resolver(false)
                 }
             }
@@ -427,232 +379,28 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         resolver: @escaping RCTPromiseResolveBlock,
         rejecter: @escaping RCTPromiseRejectBlock
     ) {
-        print("🛑 Turning off speed alert via VietmapTrackingSDK")
 
         trackingManager.turnOffAlert { success in
             DispatchQueue.main.async {
                 if success {
-                    print("✅ Speed alert turned off successfully")
                     resolver(true)
                 } else {
-                    print("❌ Failed to turn off speed alert")
                     resolver(false)
                 }
             }
         }
-    }
-
-    // MARK: - Route Management Methods
-
-    @objc(getCurrentRouteInfo:rejecter:)
-    func getCurrentRouteInfo(
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        if let routeInfo = trackingManager.getCurrentRouteInfo() {
-            resolver(routeInfo)
-        } else {
-            rejecter("NO_ROUTE_DATA", "No route data available", nil)
-        }
-    }
-
-    @objc(setRouteAPIEndpoint:resolver:rejecter:)
-    func setRouteAPIEndpoint(
-        endpoint: String,
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        print("🗺️ Setting route API endpoint: \(endpoint)")
-
-        trackingManager.setRouteAPIEndpoint(endpoint) { success in
-            DispatchQueue.main.async {
-                if success {
-                    print("✅ Route API endpoint set successfully")
-                    resolver(true)
-                } else {
-                    print("❌ Failed to set route API endpoint")
-                    rejecter("ENDPOINT_SET_FAILED", "Failed to set route API endpoint", nil)
-                }
-            }
-        }
-    }
-
-    @objc(enableRouteBoundaryDetection:resolver:rejecter:)
-    func enableRouteBoundaryDetection(
-        threshold: Double,
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        print("🎯 Enabling route boundary detection with threshold: \(threshold)m")
-
-        trackingManager.enableRouteBoundaryDetection(threshold: threshold) { success in
-            DispatchQueue.main.async {
-                if success {
-                    print("✅ Route boundary detection enabled")
-                    resolver(true)
-                } else {
-                    print("❌ Failed to enable route boundary detection")
-                    rejecter("BOUNDARY_DETECTION_FAILED", "Failed to enable route boundary detection", nil)
-                }
-            }
-        }
-    }
-
-    // MARK: - Data Management Methods
-
-    @objc(encodeLocationData:resolver:rejecter:)
-    func encodeLocationData(
-        locationDict: NSDictionary,
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        if let encodedData = trackingManager.encodeLocationData(locationDict) {
-            // Convert Data to base64 string for React Native
-            let base64String = encodedData.base64EncodedString()
-            resolver(base64String)
-        } else {
-            rejecter("ENCODING_FAILED", "Failed to encode location data", nil)
-        }
-    }
-
-    @objc(decodeLocationData:resolver:rejecter:)
-    func decodeLocationData(
-        base64String: String,
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        guard let data = Data(base64Encoded: base64String) else {
-            rejecter("INVALID_DATA", "Invalid base64 string", nil)
-            return
-        }
-
-        if let decodedDict = trackingManager.decodeLocationData(data) {
-            resolver(decodedDict)
-        } else {
-            rejecter("DECODING_FAILED", "Failed to decode location data", nil)
-        }
-    }
-
-    @objc(getCachedLocationsCount:rejecter:)
-    func getCachedLocationsCount(
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        let count = trackingManager.getCachedLocationsCount()
-        resolver(count)
-    }
-
-    @objc(uploadCachedLocationsManually:rejecter:)
-    func uploadCachedLocationsManually(
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        print("📤 Manually uploading cached locations")
-
-        trackingManager.uploadCachedLocationsManually { success, message in
-            DispatchQueue.main.async {
-                if success {
-                    print("✅ Cached locations uploaded successfully")
-                    resolver(true)
-                } else {
-                    print("❌ Failed to upload cached locations: \(message ?? "Unknown error")")
-                    rejecter("UPLOAD_FAILED", message ?? "Failed to upload cached locations", nil)
-                }
-            }
-        }
-    }
-
-    @objc(clearCachedLocations:rejecter:)
-    func clearCachedLocations(
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        print("🗑️ Clearing cached locations")
-
-        trackingManager.clearCachedLocations()
-
-        print("✅ Cached locations cleared")
-        resolver(true)
-    }
-
-    // MARK: - Network and System Methods
-
-    @objc(isNetworkConnected:rejecter:)
-    func isNetworkConnected(
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        let isConnected = trackingManager.isNetworkConnected()
-        resolver(isConnected)
-    }
-
-    // MARK: - Utility Methods
-
-    @objc(setTrackingStatus:resolver:rejecter:)
-    func setTrackingStatus(
-        status: String,
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        print("📝 Setting tracking status: \(status)")
-
-        trackingManager.setTrackingStatus(status)
-
-        print("✅ Tracking status set successfully")
-        resolver(true)
-    }
-
-    @objc(setAutoUpload:resolver:rejecter:)
-    func setAutoUpload(
-        enabled: Bool,
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        print("🔄 Setting auto upload: \(enabled)")
-
-        trackingManager.setAutoUpload(enabled: enabled)
-
-        print("✅ Auto upload setting updated")
-        resolver(true)
     }
 }
 
 // MARK: - Legacy Support Methods (kept for backward compatibility)
 
 extension RnVietmapTrackingPlugin {
-
-    @objc(findNearestAlert:longitude:resolver:rejecter:)
-    func findNearestAlert(
-        latitude: Double,
-        longitude: Double,
-        resolver: @escaping RCTPromiseResolveBlock,
-        rejecter: @escaping RCTPromiseRejectBlock
-    ) {
-        // This method is now handled internally by VietmapTrackingSDK
-        // We delegate to getCurrentRouteInfo for route-related data
-        if let routeInfo = trackingManager.getCurrentRouteInfo() {
-            // Extract relevant alert information
-            let alertInfo: [String: Any] = [
-                "latitude": latitude,
-                "longitude": longitude,
-                "routeInfo": routeInfo,
-                "timestamp": Date().timeIntervalSince1970 * 1000
-            ]
-            resolver(alertInfo)
-        } else {
-            rejecter("NO_ROUTE_DATA", "No route data available for alert calculation", nil)
-        }
-    }
-
     @objc(updateTrackingConfig:resolver:rejecter:)
     func updateTrackingConfig(
         config: NSDictionary,
         resolver: @escaping RCTPromiseResolveBlock,
         rejecter: @escaping RCTPromiseRejectBlock
     ) {
-        // Configuration updates are now handled by VietmapTrackingSDK internally
-        // This method is kept for backward compatibility
-        print("⚙️ Tracking config update request received (handled by SDK)")
 
         // Store config for reference but don't actually change SDK configuration
         // during active tracking (SDK handles this internally)
@@ -669,8 +417,6 @@ extension RnVietmapTrackingPlugin {
 
             currentTrackingConfig = currentConfig
         }
-
-        print("✅ Config stored for reference (actual changes handled by SDK)")
         resolver(true)
     }
 }

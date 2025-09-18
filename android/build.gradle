@@ -82,7 +82,7 @@ dependencies {
   implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 
   // VietmapTrackingSDK for Android
-  implementation 'com.github.vietmap-company:vietmap-tracking-sdk-android:1.0.3'
+  implementation 'com.github.vietmap-company:vietmap-tracking-sdk-android:1.1.6'
 
   // Android support libraries
   implementation 'com.google.code.gson:gson:2.10.1'

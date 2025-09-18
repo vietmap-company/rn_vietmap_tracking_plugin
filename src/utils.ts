@@ -181,8 +181,7 @@ export class LocationUtils {
     } else if (Platform.OS === 'android') {
       // Android specific optimizations
       if (config.intervalMs < 5000) {
-        // Android battery optimization
-        console.warn('Very frequent updates may impact battery life on Android');
+        // Android battery optimization - removed warning
       }
     }
 

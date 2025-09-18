@@ -48,8 +48,7 @@ const GPSTrackingDemo = () => {
   const defaultConfig: LocationTrackingConfig = {
     intervalMs: 5000,
     distanceFilter: 10,
-    accuracy: 'high',
-    backgroundMode: true,
+    backgroundMode: false,
     notificationTitle: 'GPS Tracking',
     notificationMessage: 'Your location is being tracked'
   };
@@ -75,12 +74,12 @@ const GPSTrackingDemo = () => {
     try {
       // Configure VietmapTrackingSDK with API key
       console.log('🔧 Configuring VietmapTrackingSDK...');
-      await configure('YOUR_API_KEY_HERE', 'YOUR_BASE_URL_HERE', true);
+      await configure('d18c0d40c7e7b75cd287b5a0e005edbdcd8772167a4f6140');
       console.log('✅ VietmapTrackingSDK configured successfully');
 
       // Configure Alert API
       console.log('🚨 Configuring Alert API...');
-      await configureAlertAPI('YOUR_BASE_URL_HERE', 'YOUR_ALERT_API_KEY_HERE');
+      await configureAlertAPI('YOUR_ALERT_API_KEY_HERE', 'YOUR_ALERT_API_ID_HERE');
       console.log('✅ Alert API configured successfully');
 
       await checkPermissions();
@@ -173,7 +172,6 @@ const GPSTrackingDemo = () => {
       return {
         intervalMs: parseInt(customInterval) || 5000,
         distanceFilter: parseInt(customDistance) || 10,
-        accuracy: defaultConfig.accuracy,
         backgroundMode: customBackgroundMode,
         notificationTitle: defaultConfig.notificationTitle,
         notificationMessage: defaultConfig.notificationMessage,
@@ -189,22 +187,6 @@ const GPSTrackingDemo = () => {
     }
 
     try {
-      // Request always location permissions for background tracking
-      console.log('🔐 Requesting always location permissions...');
-      const alwaysPermissionResult = await requestAlwaysLocationPermissions();
-      console.log('🔐 Always permission result:', alwaysPermissionResult);
-
-      if (alwaysPermissionResult !== 'granted') {
-        Alert.alert(
-          '⚠️ Background Tracking',
-          'Always location permission is recommended for background tracking.',
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => {} },
-          ]
-        );
-        return;
-      }
-
       await startTrackingWithConfig();
     } catch (error) {
       console.error('Error requesting always permissions:', error);
@@ -221,13 +203,7 @@ const GPSTrackingDemo = () => {
       const result = await startTracking(activeConfig);
       console.log('✅ Enhanced tracking result:', result);
 
-      // Check if tracking started successfully
-      const resultStr = String(result || '');
-      if (result && (
-        resultStr.includes('tracking') && resultStr.includes('started') ||
-        result === 'success' ||
-        resultStr.includes('success')
-      )) {
+      if (result) {
         // Update tracking state immediately after successful start
         setIsTracking(true);
 
@@ -255,7 +231,7 @@ const GPSTrackingDemo = () => {
       console.log('✅ Enhanced tracking stopped:', result);
 
       // Check if tracking stopped successfully
-      if (result && (result === 'success' || result.includes('stopped') || result.includes('success'))) {
+      if (result) {
         // Update tracking state immediately after successful stop
         setIsTracking(false);
 
@@ -469,7 +445,6 @@ const GPSTrackingDemo = () => {
             Current: {useCustomConfig ? 'Custom' : 'Preset'} |
             Interval: {getActiveConfig().intervalMs}ms |
             Distance: {getActiveConfig().distanceFilter}m |
-            Accuracy: {getActiveConfig().accuracy} |
             Background: {getActiveConfig().backgroundMode ? '✅' : '❌'} |
           </Text>
         </View>
@@ -542,9 +517,6 @@ const GPSTrackingDemo = () => {
             </Text>
             <Text style={styles.locationText}>
               <Text style={styles.bold}>Altitude:</Text> {currentLocation.altitude.toFixed(2)}m
-            </Text>
-            <Text style={styles.locationText}>
-              <Text style={styles.bold}>Accuracy:</Text> {currentLocation.accuracy.toFixed(2)}m
             </Text>
             <Text style={styles.locationText}>
               <Text style={styles.bold}>Speed:</Text> {LocationUtils.mpsToKmh(currentLocation.speed).toFixed(2)} km/h

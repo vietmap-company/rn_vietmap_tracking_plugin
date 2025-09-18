@@ -52,9 +52,9 @@ export async function hasLocationPermissions(): Promise<PermissionResult> {
  * @param autoUpload - Optional auto upload setting (default: true)
  * @returns Promise<boolean> - Success status
  */
-export async function configure(apiKey: string, baseURL?: string, autoUpload: boolean = true): Promise<boolean> {
+export async function configure(apiKey: string, baseURL?: string): Promise<boolean> {
   try {
-    const result = await RnVietmapTrackingPlugin.configure(apiKey, baseURL, autoUpload);
+    const result = await RnVietmapTrackingPlugin.configure(apiKey, baseURL);
     return result;
   } catch (error) {
     console.error('Failed to configure VietmapTrackingSDK:', error);
@@ -64,13 +64,13 @@ export async function configure(apiKey: string, baseURL?: string, autoUpload: bo
 
 /**
  * Configure Alert API for speed alerts
- * @param url - Alert API URL
  * @param apiKey - API key for Alert API
+ * @param apiID - API ID for Alert API
  * @returns Promise<boolean> - Success status
  */
-export async function configureAlertAPI(url: string, apiKey: string): Promise<boolean> {
+export async function configureAlertAPI(apiKey: string, apiID: string): Promise<boolean> {
   try {
-    const result = await RnVietmapTrackingPlugin.configureAlertAPI(url, apiKey);
+    const result = await RnVietmapTrackingPlugin.configureAlertAPI(apiKey, apiID);
     return result;
   } catch (error) {
     console.error('Failed to configure Alert API:', error);
@@ -98,14 +98,17 @@ export async function startLocationTracking(config: LocationTrackingConfig): Pro
     const backgroundMode = config.backgroundMode || false;
     const intervalMs = config.intervalMs || 5000;
     const distanceFilter = config.distanceFilter || 10;
+    const notificationTitle = config.notificationTitle;
+    const notificationMessage = config.notificationMessage;
 
     const result = await RnVietmapTrackingPlugin.startTracking(
       backgroundMode,
       intervalMs,
-      false, // forceUpdateBackground default to false
-      distanceFilter
+      distanceFilter,
+      notificationTitle,
+      notificationMessage
     );
-    return result === 'success';
+    return result;
   } catch (error) {
     console.error('Failed to start location tracking:', error);
     throw error;
@@ -119,7 +122,7 @@ export async function startLocationTracking(config: LocationTrackingConfig): Pro
 export async function stopLocationTracking(): Promise<boolean> {
   try {
     const result = await RnVietmapTrackingPlugin.stopTracking();
-    return result === 'success';
+    return result;
   } catch (error) {
     console.error('Failed to stop location tracking:', error);
     return false;
@@ -140,7 +143,7 @@ export async function getCurrentLocation(): Promise<LocationData> {
  * @returns Promise<boolean> - Tracking status
  */
 export async function isTrackingActive(): Promise<boolean> {
-  return RnVietmapTrackingPlugin.isTrackingActive();
+  return await RnVietmapTrackingPlugin.isTrackingActive();
 }
 
 /**
@@ -205,12 +208,7 @@ export function createDefaultConfig(intervalMs: number = 5000): LocationTracking
   // Validate and normalize config
   const validationResult = validateLocationConfig(config);
   if (!validationResult.isValid) {
-    console.warn('Invalid default config:', validationResult.errors);
     return normalizeLocationConfig(config);
-  }
-
-  if (validationResult.warnings.length > 0) {
-    console.warn('Config warnings:', validationResult.warnings);
   }
 
   return config;

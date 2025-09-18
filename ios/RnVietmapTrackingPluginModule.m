@@ -15,8 +15,9 @@ RCT_EXTERN_METHOD(multiply:(double)a b:(double)b)
 // Enhanced tracking methods for background_location_2 strategy
 RCT_EXTERN_METHOD(startTracking:(BOOL)backgroundMode
                   intervalMs:(int)intervalMs
-                  forceUpdateBackground:(BOOL)forceUpdateBackground
                   distanceFilter:(double)distanceFilter
+                  notificationTitle:(NSString *)notificationTitle
+                  notificationMessage:(NSString *)notificationMessage
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
@@ -81,12 +82,11 @@ RCT_EXTERN_METHOD(enableRouteBoundaryDetection:(double)threshold
 // Configuration methods
 RCT_EXTERN_METHOD(configure:(NSString *)apiKey
                   baseURL:(NSString *)baseURL
-                  autoUpload:(BOOL)autoUpload
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(configureAlertAPI:(NSString *)url
-                  apiKey:(NSString *)apiKey
+RCT_EXTERN_METHOD(configureAlertAPI:(NSString *)apiKey
+                  apiID:(NSString *)apiID
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

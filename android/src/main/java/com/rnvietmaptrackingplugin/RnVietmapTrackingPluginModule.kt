@@ -3,7 +3,6 @@ package com.rnvietmaptrackingplugin
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
 import com.facebook.react.bridge.*
@@ -57,20 +56,15 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private var pendingBackgroundPermissionPromise: Promise? = null
 
   init {
-    Log.d(NAME, "🚀 Initializing RnVietmapTrackingPlugin with VietmapTrackingSDK")
     initializeSDK()
   }
 
   // MARK: - VietmapTrackingSDK Initialization
   private fun initializeSDK() {
     try {
-      // Initialize VietmapTrackingSDK instance
+      // Initialize VietmapTrackingSDK instance (but not initialized until configure() is called)
       vietmapSDK = VietmapTrackingSDK.getInstance(reactApplicationContext)
-
-      Log.d(NAME, "✅ VietmapTrackingSDK initialized successfully")
-      isInitialized = true
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to initialize VietmapTrackingSDK: ${e.message}", e)
       isInitialized = false
     }
   }
@@ -97,20 +91,12 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         .emit(eventName, params)
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to send event $eventName: ${e.message}", e)
     }
   }
 
   // MARK: - Configuration
   @ReactMethod
-  fun configure(apiKey: String, baseURL: String?, autoUpload: Boolean, promise: Promise) {
-    Log.d(NAME, "🔧 Configuring VietmapTrackingSDK with apiKey: ${if (apiKey.isNotEmpty()) "provided" else "missing"}")
-
-    if (!isInitialized) {
-      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK is not initialized")
-      return
-    }
-
+  fun configure(apiKey: String, baseURL: String?, promise: Promise) {
     try {
       // Validate API key
       if (apiKey.isEmpty()) {
@@ -119,58 +105,56 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       }
 
       // Initialize VietmapTrackingSDK with API key
-      vietmapSDK.initialize(apiKey)
+      if (baseURL != null && baseURL.isNotEmpty()) {
+          vietmapSDK.initialize(apiKey, baseURL)
+      } else {
+          vietmapSDK.initialize(apiKey)
+      }
+
+      // Set isInitialized to true only after successful initialization
+      isInitialized = true
 
       // Store current configuration
       currentTrackingConfig = Arguments.createMap().apply {
         putString("apiKey", "***")  // Don't expose API key
         putString("baseURL", baseURL ?: "")
-        putBoolean("autoUpload", autoUpload)
         putDouble("updateInterval", 20000.0)
         putDouble("minDistanceFilter", 10.0)
         putBoolean("enableBackgroundMode", true)
         putDouble("timestamp", System.currentTimeMillis().toDouble())
       }
 
-      Log.d(NAME, "✅ VietmapTrackingSDK configured successfully")
       promise.resolve(true)
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Configuration failed: ${e.message}", e)
+      isInitialized = false
       promise.reject("CONFIGURE_FAILED", "Failed to configure VietmapTrackingSDK: ${e.message}")
     }
   }
 
   @ReactMethod
-  fun configureAlertAPI(url: String, apiKey: String, promise: Promise) {
+  fun configureAlertAPI(apiKey: String, apiID: String, promise: Promise) {
     if (!isInitialized) {
       promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
       return
     }
 
-    Log.d(NAME, "🚨 Configuring Alert API: $url")
-
     try {
       // Configure alert API with VietmapTrackingSDK
-      vietmapSDK.configureAlertAPI(url, apiKey)
+      vietmapSDK.configureAlertAPI(apiKey, apiID)
 
-      Log.d(NAME, "✅ Alert API configured successfully")
       promise.resolve(true)
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to configure Alert API: ${e.message}", e)
       promise.reject("ALERT_CONFIG_FAILED", "Failed to configure Alert API: ${e.message}")
     }
   }
 
   @ReactMethod
   fun requestLocationPermissions(promise: Promise) {
-    Log.d(NAME, "🔍 Requesting location permissions for VietmapTrackingSDK")
-
     try {
       // Check if we already have location permissions
       if (hasLocationPermission()) {
-        Log.d(NAME, "✅ Location permissions already granted")
         val result = Arguments.createMap().apply {
           putBoolean("granted", true)
           putString("status", "granted")
@@ -185,14 +169,12 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       // Get current activity
       val activity = currentActivity
       if (activity == null) {
-        Log.e(NAME, "❌ No current activity available for permission request")
         promise.reject("NO_ACTIVITY", "No current activity available for permission request")
         return
       }
 
       // Check if activity implements PermissionAwareActivity
       if (activity !is PermissionAwareActivity) {
-        Log.e(NAME, "❌ Activity does not implement PermissionAwareActivity")
         promise.reject("INVALID_ACTIVITY", "Activity does not implement PermissionAwareActivity")
         return
       }
@@ -213,8 +195,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         permissions
       }
 
-      Log.d(NAME, "📱 Requesting location permissions via PermissionAwareActivity")
-
       // Use PermissionAwareActivity to request permissions
       activity.requestPermissions(
         backgroundPermissions,
@@ -223,7 +203,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       )
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to request location permissions: ${e.message}", e)
       promise.reject("PERMISSION_REQUEST_FAILED", "Failed to request location permissions: ${e.message}")
     }
   }
@@ -257,7 +236,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     val promise = pendingLocationPermissionPromise ?: pendingBackgroundPermissionPromise
 
     if (promise == null) {
-      Log.w(NAME, "⚠️ No pending permission promise found")
       return
     }
 
@@ -283,8 +261,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
       val allPermissionsGranted = fineLocationGranted && coarseLocationGranted
 
-      Log.d(NAME, "📋 Permission results - Fine: $fineLocationGranted, Coarse: $coarseLocationGranted, Background: $backgroundLocationGranted")
-
       // If this is from requestAlwaysLocationPermissions and basic permissions are granted
       if (isAlwaysPermissionFlow && allPermissionsGranted) {
         // Check if we need background permission for Android 10+
@@ -295,8 +271,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
           ) == PackageManager.PERMISSION_GRANTED
 
           if (!currentBackgroundGranted) {
-            Log.d(NAME, "🔄 Basic permissions granted, now requesting background location permission")
-
             val activity = currentActivity
             if (activity != null) {
               ActivityCompat.requestPermissions(
@@ -307,7 +281,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
               // Don't resolve promise yet, wait for background permission result
               return
             } else {
-              Log.e(NAME, "❌ No current activity available for background permission request")
               promise.resolve("denied")
             }
           } else {
@@ -332,7 +305,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         }
 
         if (allPermissionsGranted) {
-          Log.d(NAME, "✅ Location permissions granted")
 
           // Send permission granted event
           sendEvent("onPermissionChanged", Arguments.createMap().apply {
@@ -340,7 +312,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
             putString("type", "location")
           })
         } else {
-          Log.w(NAME, "⚠️ Location permissions denied")
 
           // Send permission denied event
           sendEvent("onPermissionChanged", Arguments.createMap().apply {
@@ -353,7 +324,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       }
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Error handling permission result: ${e.message}", e)
       if (isAlwaysPermissionFlow) {
         promise.resolve("denied")
       } else {
@@ -370,7 +340,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   private fun handleBackgroundLocationPermissionResult(permissions: Array<String>, grantResults: IntArray) {
     val promise = pendingBackgroundPermissionPromise
     if (promise == null) {
-      Log.w(NAME, "⚠️ No pending background permission promise found")
       return
     }
 
@@ -385,10 +354,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         }
       }
 
-      Log.d(NAME, "🔍 Background location permission result: $backgroundLocationGranted")
-
       if (backgroundLocationGranted) {
-        Log.d(NAME, "✅ Background location permission granted")
         promise.resolve("granted")
 
         // Send permission granted event
@@ -397,7 +363,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
           putString("type", "background_location")
         })
       } else {
-        Log.w(NAME, "⚠️ Background location permission denied")
         promise.resolve("denied")
 
         // Send permission denied event
@@ -408,7 +373,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       }
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Error handling background permission result: ${e.message}", e)
       promise.resolve("denied")
     } finally {
       pendingBackgroundPermissionPromise = null
@@ -419,7 +383,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   fun hasLocationPermissions(promise: Promise) {
     try {
       val hasPermissions = hasLocationPermission()
-      Log.d(NAME, "📍 Location permissions check: $hasPermissions")
 
       val result = Arguments.createMap().apply {
         putBoolean("granted", hasPermissions)
@@ -428,19 +391,15 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
       promise.resolve(result)
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to check location permissions: ${e.message}", e)
       promise.reject("PERMISSION_CHECK_FAILED", "Failed to check location permissions: ${e.message}")
     }
   }
 
   @ReactMethod
   fun requestAlwaysLocationPermissions(promise: Promise) {
-    Log.d(NAME, "🔐 Requesting always location permissions (background location)")
-
     try {
       val activity = currentActivity
       if (activity == null) {
-        Log.e(NAME, "❌ No current activity available")
         promise.resolve("denied")
         return
       }
@@ -466,19 +425,14 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         true // Background location is automatically granted on older versions
       }
 
-      Log.d(NAME, "🔍 Current permissions - Fine: $hasFineLocation, Coarse: $hasCoarseLocation, Background: $hasBackgroundLocation")
-
       // If we already have all permissions, return granted
       if (hasFineLocation && hasCoarseLocation && hasBackgroundLocation) {
-        Log.d(NAME, "✅ All location permissions already granted")
         promise.resolve("granted")
         return
       }
 
       // Check if we need to request basic location permissions first
       if (!hasFineLocation || !hasCoarseLocation) {
-        Log.d(NAME, "📍 Basic location permissions not granted, requesting foreground permissions first")
-
         // Store the original promise to resolve later
         pendingBackgroundPermissionPromise = promise
 
@@ -501,7 +455,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
       // If basic permissions are granted but background is not (Android 10+)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !hasBackgroundLocation) {
-        Log.d(NAME, "🔄 Requesting background location permission")
 
         // Store promise for background permission request
         pendingBackgroundPermissionPromise = promise
@@ -518,7 +471,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       promise.resolve("granted")
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to request always location permissions: ${e.message}", e)
       promise.resolve("denied")
     }
   }
@@ -528,49 +480,54 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   fun startTracking(
     backgroundMode: Boolean,
     intervalMs: Double,
-    forceUpdateBackground: Boolean?,
     distanceFilter: Double?,
-    promise: Promise
-  ) {
+    notificationTitle: String?,
+    notificationMessage: String?
+  ): Boolean {
     if (!isInitialized) {
-      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
-      return
+      return false
     }
 
-    Log.d(NAME, "🚀 Starting VietmapTrackingSDK tracking")
-
     try {
+
+      // Set notification parameters if provided
+      if (!notificationTitle.isNullOrEmpty()) {
+        vietmapSDK.setNotificationTitle(notificationTitle)
+
+      }
+      if (!notificationMessage.isNullOrEmpty()) {
+        vietmapSDK.setNotificationText(notificationMessage)
+      }
+      // Configure tracking settings
+      val trackingConfig = TrackingConfig().apply {
+          updateInterval = intervalMs.toLong()
+          minDistanceFilter = distanceFilter ?: 10.0
+          enableBackgroundMode = backgroundMode
+      }
+      vietmapSDK.setTrackingConfig(trackingConfig)
+
       // Start tracking with VietmapTrackingSDK
       vietmapSDK.startTracking()
-
-      Log.d(NAME, "✅ VietmapTrackingSDK tracking started successfully")
-      promise.resolve("VietmapTrackingSDK tracking started")
+      return true
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to start VietmapTrackingSDK tracking: ${e.message}", e)
-      promise.reject("TRACKING_START_FAILED", "Failed to start tracking: ${e.message}")
+      return false
     }
   }
 
   @ReactMethod
-  fun stopTracking(promise: Promise) {
+  fun stopTracking(): Boolean {
     if (!isInitialized) {
-      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
-      return
+      return false
     }
-
-    Log.d(NAME, "🛑 Stopping VietmapTrackingSDK tracking")
 
     try {
       // Stop tracking with VietmapTrackingSDK
       vietmapSDK.stopTracking()
-
-      Log.d(NAME, "✅ VietmapTrackingSDK tracking stopped successfully")
-      promise.resolve("VietmapTrackingSDK tracking stopped")
+      return true
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to stop VietmapTrackingSDK tracking: ${e.message}", e)
-      promise.reject("TRACKING_STOP_FAILED", "Failed to stop tracking: ${e.message}")
+      return false
     }
   }
 
@@ -584,11 +541,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     try {
       // Check tracking status with VietmapTrackingSDK
       val isActive = vietmapSDK.isTracking()
-      Log.d(NAME, "📊 VietmapTrackingSDK tracking active: $isActive")
       promise.resolve(isActive)
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to check VietmapTrackingSDK tracking status: ${e.message}", e)
       promise.reject("STATUS_ERROR", "Failed to check tracking status: ${e.message}")
     }
   }
@@ -614,11 +569,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         putDouble("timestamp", System.currentTimeMillis().toDouble())
       }
 
-      Log.d(NAME, "📊 VietmapTrackingSDK tracking status: isTracking=$isActive")
       promise.resolve(status)
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to get VietmapTrackingSDK tracking status: ${e.message}", e)
       promise.reject("STATUS_ERROR", "Failed to get tracking status: ${e.message}")
     }
   }
@@ -631,22 +584,18 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       return
     }
 
-    Log.d(NAME, "🚨 Turning on speed alert via VietmapTrackingSDK")
 
     try {
       // Turn on alert with VietmapTrackingSDK
       val success = vietmapSDK.startAlert()
 
       if (success) {
-        Log.d(NAME, "✅ Speed alert turned on successfully")
         promise.resolve(true)
       } else {
-        Log.w(NAME, "❌ Failed to turn on speed alert")
         promise.resolve(false)
       }
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to turn on speed alert: ${e.message}", e)
       promise.resolve(false)
     }
   }
@@ -658,47 +607,18 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       return
     }
 
-    Log.d(NAME, "🛑 Turning off speed alert via VietmapTrackingSDK")
-
     try {
       // Turn off alert with VietmapTrackingSDK
       val success = vietmapSDK.stopAlert()
 
       if (success) {
-        Log.d(NAME, "✅ Speed alert turned off successfully")
         promise.resolve(true)
       } else {
-        Log.w(NAME, "❌ Failed to turn off speed alert")
         promise.resolve(false)
       }
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to turn off speed alert: ${e.message}", e)
       promise.resolve(false)
-    }
-  }
-
-  // MARK: - Route Data Methods
-  @ReactMethod
-  fun setRouteData(routeJsonString: String, promise: Promise) {
-    if (!isInitialized) {
-      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
-      return
-    }
-
-    Log.d(NAME, "🗺️ Setting route data to VietmapTrackingSDK")
-
-    try {
-      // VietmapTrackingSDK expects a JSON string, not RouteData object
-      // Set route data using VietmapTrackingSDK with JSON string
-      vietmapSDK.setRouteData(routeJsonString)
-
-      Log.d(NAME, "✅ Route data set successfully in VietmapTrackingSDK")
-      promise.resolve(true)
-
-    } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to set route data: ${e.message}", e)
-      promise.reject("ROUTE_DATA_FAILED", "Failed to set route data: ${e.message}")
     }
   }
 
@@ -710,17 +630,12 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       return
     }
 
-    Log.d(NAME, "🗑️ Clearing VietmapTrackingSDK cache")
-
     try {
       // Clear cache using VietmapTrackingSDK (if method exists)
       // TODO: Add actual clearCache method when available in API
-
-      Log.d(NAME, "✅ VietmapTrackingSDK cache cleared successfully")
       promise.resolve(true)
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to clear VietmapTrackingSDK cache: ${e.message}", e)
       promise.reject("CLEAR_FAILED", "Failed to clear cache: ${e.message}")
     }
   }
@@ -732,12 +647,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     if (isInitialized) {
       try {
         vietmapSDK.stopTracking()
-        Log.d(NAME, "🧹 VietmapTrackingSDK resources cleaned up")
       } catch (e: Exception) {
-        Log.e(NAME, "Error during cleanup: ${e.message}", e)
       }
     }
-    Log.d(NAME, "🔄 Module invalidated and cleaned up")
   }
 
   // MARK: - Legacy Support Methods (kept for backward compatibility)
@@ -748,8 +660,6 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
       return
     }
 
-    Log.d(NAME, "🔍 Finding nearest alert for coordinates: ($latitude, $longitude)")
-
     try {
       // This method is now handled internally by VietmapTrackingSDK
       // We delegate to route data for route-related alert information
@@ -759,12 +669,9 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
         putString("routeInfo", "Alert data handled by VietmapTrackingSDK")
         putDouble("timestamp", System.currentTimeMillis().toDouble())
       }
-
-      Log.d(NAME, "✅ Alert info prepared")
       promise.resolve(alertInfo)
 
     } catch (e: Exception) {
-      Log.e(NAME, "❌ Failed to find nearest alert: ${e.message}", e)
       promise.reject("NO_ROUTE_DATA", "No route data available for alert calculation")
     }
   }
