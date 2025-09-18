@@ -19,7 +19,6 @@ import {
   addLocationUpdateListener,
   addTrackingStatusListener,
   requestLocationPermissions,
-  requestAlwaysLocationPermissions,
   hasLocationPermissions,
   updateTrackingConfig,
   getTrackingStatus,
@@ -48,6 +47,7 @@ const GPSTrackingDemo = () => {
   const defaultConfig: LocationTrackingConfig = {
     intervalMs: 5000,
     distanceFilter: 10,
+    accuracy: 'high',
     backgroundMode: false,
     notificationTitle: 'GPS Tracking',
     notificationMessage: 'Your location is being tracked'
@@ -172,6 +172,7 @@ const GPSTrackingDemo = () => {
       return {
         intervalMs: parseInt(customInterval) || 5000,
         distanceFilter: parseInt(customDistance) || 10,
+        accuracy: 'high',
         backgroundMode: customBackgroundMode,
         notificationTitle: defaultConfig.notificationTitle,
         notificationMessage: defaultConfig.notificationMessage,

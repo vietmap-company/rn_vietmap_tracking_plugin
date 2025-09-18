@@ -87,20 +87,6 @@ Add the following permissions to your `android/app/src/main/AndroidManifest.xml`
 <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-<uses-permission android:name="android.permission.WAKE_LOCK" />
-```
-
-#### Foreground Service (Optional)
-
-For enhanced background tracking, add the location service to your manifest:
-
-```xml
-<application>
-    <service
-        android:name="com.rnvietmaptrackingplugin.LocationTrackingService"
-        android:foregroundServiceType="location"
-        android:exported="false" />
-</application>
 ```
 
 ## 🚀 Quick Start

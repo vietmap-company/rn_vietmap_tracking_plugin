@@ -9,7 +9,7 @@ import java.util.HashMap
 
 class RnVietmapTrackingPluginPackage : BaseReactPackage() {
   override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
-    return if (name == RnVietmapTrackingPluginModule.NAME) {
+    return if (name == NativeRnVietmapTrackingPluginSpec.NAME) {
       RnVietmapTrackingPluginModule(reactContext)
     } else {
       null
@@ -19,13 +19,13 @@ class RnVietmapTrackingPluginPackage : BaseReactPackage() {
   override fun getReactModuleInfoProvider(): ReactModuleInfoProvider {
     return ReactModuleInfoProvider {
       val moduleInfos: MutableMap<String, ReactModuleInfo> = HashMap()
-      moduleInfos[RnVietmapTrackingPluginModule.NAME] = ReactModuleInfo(
-        RnVietmapTrackingPluginModule.NAME,
-        RnVietmapTrackingPluginModule.NAME,
+      moduleInfos[NativeRnVietmapTrackingPluginSpec.NAME] = ReactModuleInfo(
+        NativeRnVietmapTrackingPluginSpec.NAME,
+        NativeRnVietmapTrackingPluginSpec.NAME,
         false,  // canOverrideExistingModule
         false,  // needsEagerInit
         false,  // isCxxModule
-        false // isTurboModule
+        true // isTurboModule
       )
       moduleInfos
     }

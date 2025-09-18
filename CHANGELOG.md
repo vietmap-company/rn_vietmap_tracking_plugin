@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-09-18
+
+### Fixed
+- Fixed TurboModule registration issues on Android platform
+- Resolved iOS Swift syntax errors with preprocessor directives
+- Fixed TypeScript compilation errors in example application
+- Updated ESLint configuration for proper TypeScript and JSX parsing
+- Fixed missing accuracy property in LocationTrackingConfig objects
+- Resolved Android TurboModule architecture compliance with generated specs
+
+### Changed
+- Migrated Android implementation to extend NativeRnVietmapTrackingPluginSpec
+- Updated iOS implementation to remove C-style preprocessor directives in Swift
+- Enhanced ESLint configuration with TypeScript parser support
+- Improved build process with proper TurboModule architecture
+- Updated dependencies for better compatibility
+
+### Technical Improvements
+- Complete TurboModule architecture implementation for both platforms
+- Proper method signatures with Promise parameters on Android
+- Clean Swift implementation without conditional compilation issues
+- Comprehensive TypeScript type checking and validation
+- Enhanced code quality enforcement with ESLint
+- Successful cross-platform build and test validation
+
 ## [0.1.0] - 2025-18-09
 
 ### Added

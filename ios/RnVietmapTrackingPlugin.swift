@@ -52,6 +52,11 @@ class RnVietmapTrackingPlugin: RCTEventEmitter {
         ]
     }
 
+    // MARK: - TurboModule Support
+    override static func moduleName() -> String! {
+        return "RnVietmapTrackingPlugin"
+    }
+
     // MARK: - SDK Callback Setup
     private func setupSDKCallbacks() {
         // Forward all SDK events to React Native

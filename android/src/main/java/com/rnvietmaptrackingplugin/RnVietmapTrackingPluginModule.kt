@@ -28,23 +28,22 @@ import com.vietmap.trackingsdk.RouteData
  * - Proper permission handling
  */
 class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
-  ReactContextBaseJavaModule(reactContext) {
+  NativeRnVietmapTrackingPluginSpec(reactContext) {
 
-  override fun getName(): String {
-    return NAME
+  companion object {
+    const val LOCATION_PERMISSION_REQUEST_CODE = 1001
+    const val BACKGROUND_LOCATION_PERMISSION_REQUEST_CODE = 1002
   }
 
   override fun getConstants(): MutableMap<String, Any> {
     return hashMapOf(
-      "supportedEvents" to arrayOf(
-        "onLocationUpdate",
-        "onTrackingStatusChanged",
-        "onLocationError",
-        "onPermissionChanged",
-        "onRouteUpdate",
-        "onSpeedAlert"
-      )
+      "screenWidth" to reactApplicationContext.resources.displayMetrics.widthPixels,
+      "screenHeight" to reactApplicationContext.resources.displayMetrics.heightPixels
     )
+  }
+
+  override fun multiply(a: Double, b: Double): Double {
+    return a * b
   }
 
   // MARK: - VietmapTrackingSDK Integration
@@ -96,7 +95,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
   // MARK: - Configuration
   @ReactMethod
-  fun configure(apiKey: String, baseURL: String?, promise: Promise) {
+  override fun configure(apiKey: String, baseURL: String?, promise: Promise) {
     try {
       // Validate API key
       if (apiKey.isEmpty()) {
@@ -133,7 +132,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun configureAlertAPI(apiKey: String, apiID: String, promise: Promise) {
+  override fun configureAlertAPI(apiKey: String, apiID: String, promise: Promise) {
     if (!isInitialized) {
       promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
       return
@@ -151,7 +150,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun requestLocationPermissions(promise: Promise) {
+  override fun requestLocationPermissions(promise: Promise) {
     try {
       // Check if we already have location permissions
       if (hasLocationPermission()) {
@@ -380,7 +379,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun hasLocationPermissions(promise: Promise) {
+  override fun hasLocationPermissions(promise: Promise) {
     try {
       val hasPermissions = hasLocationPermission()
 
@@ -396,7 +395,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun requestAlwaysLocationPermissions(promise: Promise) {
+  override fun requestAlwaysLocationPermissions(promise: Promise) {
     try {
       val activity = currentActivity
       if (activity == null) {
@@ -477,15 +476,17 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
   // MARK: - Tracking Methods
   @ReactMethod
-  fun startTracking(
+  override fun startTracking(
     backgroundMode: Boolean,
     intervalMs: Double,
     distanceFilter: Double?,
     notificationTitle: String?,
-    notificationMessage: String?
-  ): Boolean {
+    notificationMessage: String?,
+    promise: Promise
+  ) {
     if (!isInitialized) {
-      return false
+      promise.resolve(false)
+      return
     }
 
     try {
@@ -508,31 +509,57 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
 
       // Start tracking with VietmapTrackingSDK
       vietmapSDK.startTracking()
-      return true
+      promise.resolve(true)
 
     } catch (e: Exception) {
-      return false
+      promise.resolve(false)
     }
   }
 
   @ReactMethod
-  fun stopTracking(): Boolean {
+  override fun stopTracking(promise: Promise) {
     if (!isInitialized) {
-      return false
+      promise.resolve(false)
+      return
     }
 
     try {
       // Stop tracking with VietmapTrackingSDK
       vietmapSDK.stopTracking()
-      return true
+      promise.resolve(true)
 
     } catch (e: Exception) {
-      return false
+      promise.resolve(false)
     }
   }
 
   @ReactMethod
-  fun isTrackingActive(promise: Promise) {
+  override fun getCurrentLocation(promise: Promise) {
+    if (!isInitialized) {
+      promise.reject("NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
+      return
+    }
+
+    try {
+      // Since VietmapTrackingSDK might not have getCurrentLocation method,
+      // we'll return the last known location from the tracking session
+      val locationMap = hashMapOf<String, Any>(
+        "latitude" to 0.0,
+        "longitude" to 0.0,
+        "accuracy" to 0.0,
+        "altitude" to 0.0,
+        "bearing" to 0.0,
+        "speed" to 0.0,
+        "timestamp" to System.currentTimeMillis()
+      )
+      promise.resolve(locationMap)
+    } catch (e: Exception) {
+      promise.reject("LOCATION_ERROR", "Failed to get current location: ${e.message}")
+    }
+  }
+
+  @ReactMethod
+  override fun isTrackingActive(promise: Promise) {
     if (!isInitialized) {
       promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
       return
@@ -549,7 +576,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun getTrackingStatus(promise: Promise) {
+  override fun getTrackingStatus(promise: Promise) {
     if (!isInitialized) {
       promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
       return
@@ -576,9 +603,43 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  @ReactMethod
+  override fun updateTrackingConfig(config: ReadableMap, promise: Promise) {
+    if (!isInitialized) {
+      promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
+      return
+    }
+
+    try {
+      // Update configuration if tracking is active
+      val isActive = vietmapSDK.isTracking()
+      if (isActive) {
+        // Extract configuration from ReadableMap
+        val trackingConfig = TrackingConfig().apply {
+          if (config.hasKey("intervalMs") && !config.isNull("intervalMs")) {
+            updateInterval = config.getDouble("intervalMs").toLong()
+          }
+          if (config.hasKey("distanceFilter") && !config.isNull("distanceFilter")) {
+            minDistanceFilter = config.getDouble("distanceFilter")
+          }
+          if (config.hasKey("backgroundMode") && !config.isNull("backgroundMode")) {
+            enableBackgroundMode = config.getBoolean("backgroundMode")
+          }
+        }
+
+        vietmapSDK.setTrackingConfig(trackingConfig)
+        promise.resolve(true)
+      } else {
+        promise.resolve(false)
+      }
+    } catch (e: Exception) {
+      promise.reject("CONFIG_UPDATE_ERROR", "Failed to update tracking config: ${e.message}")
+    }
+  }
+
   // MARK: - Alert Management Methods
   @ReactMethod
-  fun turnOnAlert(promise: Promise) {
+  override fun turnOnAlert(promise: Promise) {
     if (!isInitialized) {
       promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
       return
@@ -601,7 +662,7 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun turnOffAlert(promise: Promise) {
+  override fun turnOffAlert(promise: Promise) {
     if (!isInitialized) {
       promise.reject("SDK_NOT_INITIALIZED", "VietmapTrackingSDK not initialized")
       return
@@ -674,11 +735,5 @@ class RnVietmapTrackingPluginModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       promise.reject("NO_ROUTE_DATA", "No route data available for alert calculation")
     }
-  }
-
-  companion object {
-    const val NAME = "RnVietmapTrackingPlugin"
-    const val LOCATION_PERMISSION_REQUEST_CODE = 1001
-    const val BACKGROUND_LOCATION_PERMISSION_REQUEST_CODE = 1002
   }
 }

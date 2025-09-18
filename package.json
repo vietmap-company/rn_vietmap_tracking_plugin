@@ -1,6 +1,6 @@
 {
   "name": "@vietmap/rn_vietmap_tracking_plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A React Native VietMap library for background GPS location tracking",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -62,7 +62,8 @@
   },
   "homepage": "https://github.com/vietmap-company/rn_vietmap_tracking_plugin#readme",
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "devDependencies": {
     "@commitlint/config-conventional": "^19.6.0",
@@ -76,8 +77,8 @@
     "@release-it/conventional-changelog": "^9.0.2",
     "@types/jest": "^29.5.5",
     "@types/react": "^19.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.35.1",
-    "@typescript-eslint/parser": "^8.35.1",
+    "@typescript-eslint/eslint-plugin": "^8.44.0",
+    "@typescript-eslint/parser": "^8.44.0",
     "commitlint": "^19.6.1",
     "del-cli": "^5.1.0",
     "eslint": "^9.22.0",

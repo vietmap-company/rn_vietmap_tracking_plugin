@@ -1,12 +1,23 @@
 import js from '@eslint/js';
+import tseslint from '@typescript-eslint/eslint-plugin';
+import tsparser from '@typescript-eslint/parser';
 
 export default [
   js.configs.recommended,
   {
     files: ['**/*.{js,ts,tsx}'],
+    plugins: {
+      '@typescript-eslint': tseslint,
+    },
     languageOptions: {
+      parser: tsparser,
       ecmaVersion: 'latest',
       sourceType: 'module',
+      parserOptions: {
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
       globals: {
         console: 'readonly',
         process: 'readonly',
@@ -17,6 +28,8 @@ export default [
         require: 'readonly',
         exports: 'readonly',
         global: 'readonly',
+        React: 'readonly',
+        JSX: 'readonly',
       },
     },
     rules: {
@@ -29,6 +42,10 @@ export default [
       'no-debugger': 'error',
       'no-alert': 'warn',
       'prefer-const': 'warn',
+
+      // TypeScript specific rules
+      '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
   {
