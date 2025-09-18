@@ -6,6 +6,10 @@ import BackgroundTasks
 import AVFoundation
 import VietmapTrackingSDK
 
+#if RCT_NEW_ARCH_ENABLED
+import RnVietmapTrackingPluginSpec
+#endif
+
 @objc(RnVietmapTrackingPlugin)
 class RnVietmapTrackingPlugin: RCTEventEmitter {
 
@@ -425,3 +429,12 @@ extension RnVietmapTrackingPlugin {
         resolver(true)
     }
 }
+
+#if RCT_NEW_ARCH_ENABLED
+// MARK: - TurboModule Protocol Implementation
+extension RnVietmapTrackingPlugin: NativeRnVietmapTrackingPluginSpec {
+    func getTypedExportedConstants() -> [String: Any] {
+        return [:]
+    }
+}
+#endif

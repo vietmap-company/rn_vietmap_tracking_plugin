@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2025-09-18
+
+### Fixed
+- Fixed iOS TurboModule registration and protocol implementation
+- Resolved "RnVietmapTrackingPlugin could not be found" error on iOS
+- Fixed Swift class to properly implement NativeRnVietmapTrackingPluginSpec protocol
+- Added missing TurboModule extension for iOS implementation
+- Completed iOS TurboModule architecture for New Architecture compatibility
+
+### Technical Improvements
+- Added proper TurboModule protocol conformance in Swift implementation
+- Enhanced iOS module registration with correct protocol implementation
+- Improved iOS build process with proper TurboModule integration
+- Validated cross-platform functionality on both Android and iOS
+- Successful build and runtime testing on both platforms
+
+### Build & Testing
+- iOS build process now completes successfully without TurboModule errors
+- Android build remains stable with existing TurboModule implementation
+- Example app runs successfully on both iOS and Android platforms
+- Full validation suite passes including typecheck, lint, and tests
+
 ## [0.1.1] - 2025-09-18
 
 ### Fixed
@@ -32,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced code quality enforcement with ESLint
 - Successful cross-platform build and test validation
 
-## [0.1.0] - 2025-18-09
+## [0.1.0] - 2025-09-18
 
 ### Added
 - Initial release of React Native GPS Tracking Package
