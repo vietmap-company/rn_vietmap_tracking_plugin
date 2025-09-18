@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2025-07-04
+## [0.1.0] - 2025-18-09
 
 ### Added
 - Initial release of React Native GPS Tracking Package
@@ -90,10 +90,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ESLint for code quality
 - Jest for testing
 - Release automation scripts
-
-## [0.0.1] - 2025-07-04
-
-### Added
-- Initial project setup
-- Basic package structure
-- Native module scaffolding

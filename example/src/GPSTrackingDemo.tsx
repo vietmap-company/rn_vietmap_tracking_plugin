@@ -74,7 +74,7 @@ const GPSTrackingDemo = () => {
     try {
       // Configure VietmapTrackingSDK with API key
       console.log('🔧 Configuring VietmapTrackingSDK...');
-      await configure('d18c0d40c7e7b75cd287b5a0e005edbdcd8772167a4f6140');
+      await configure('YOUR_API_KEY_HERE');
       console.log('✅ VietmapTrackingSDK configured successfully');
 
       // Configure Alert API
