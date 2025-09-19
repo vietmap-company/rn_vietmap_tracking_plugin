@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-09-19
+
+### Critical Fix
+- Fixed severe iOS build errors in RnVietmapTrackingPluginModule.m
+- Resolved "Missing context for method declaration" compilation errors
+- Fixed "@end must appear in an Objective-C context" syntax errors
+- Corrected Objective-C interface structure and method implementation placement
+
+### Fixed
+- Fixed critical Objective-C syntax errors preventing iOS compilation
+- Resolved method declaration context issues in iOS module
+- Fixed interface implementation structure for proper compilation
+- Enhanced iOS module stability and build reliability
+
+### Technical Improvements
+- Corrected Objective-C method declaration context and implementation structure
+- Improved iOS module implementation with proper category usage
+- Enhanced build process stability for iOS platform
+- Validated iOS compilation success across different architectures
+
+### Build & Testing
+- iOS build process now completes successfully without syntax errors
+- Verified compilation on both arm64 and x86_64 architectures
+- Cross-platform build stability maintained
+- Production-ready iOS implementation achieved
+
 ## [1.0.3] - 2025-09-18
 
 ### Fixed

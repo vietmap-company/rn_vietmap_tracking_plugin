@@ -15,10 +15,6 @@
 @interface RCT_EXTERN_MODULE(RnVietmapTrackingPlugin, RCTEventEmitter)
 #endif
 
-// Support both naming conventions
-@interface RCT_EXTERN_MODULE(RNVietmapTrackingPlugin, RCTEventEmitter)
-@end
-
 RCT_EXTERN_METHOD(multiply:(double)a b:(double)b)
 
 // Enhanced tracking methods for background_location_2 strategy
@@ -131,6 +127,11 @@ RCT_EXTERN_METHOD(setTrackingStatus:(NSString *)status
 RCT_EXTERN_METHOD(setAutoUpload:(BOOL)enabled
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+
+// Implementation for utility methods
+@implementation RnVietmapTrackingPlugin (Utils)
 
 + (BOOL)requiresMainQueueSetup
 {
