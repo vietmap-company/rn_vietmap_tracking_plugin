@@ -39,14 +39,17 @@ Pod::Spec.new do |s|
   s.homepage     = "https://github.com/vietmap-company/rn_vietmap_tracking_plugin"
   s.license    = { :type => "BSD-3-Clause", :file => "LICENSE" }
   s.authors      = { "VietMap" => "maps-api.support@vietmap.vn" }
-  s.platforms    = { :ios => "12.4" }
+  # React Native >= 0.76 sets min_ios_version_supported to 15.1, so the app
+  # Podfile already enforces it. The old 12.4 here understated the real floor.
+  # VietmapTrackingSDK itself only needs iOS 12.0.
+  s.platforms    = { :ios => "15.1" }
   s.source       = { :git => "https://github.com/vietmap-company/rn_vietmap_tracking_plugin.git", :tag => "#{s.version}" }
 
   s.source_files = "ios/**/*.{h,m,swift}"
   s.requires_arc = true
 
   s.dependency "React-Core"
-  s.dependency 'VietmapTrackingSDK', '1.1.6'
+  s.dependency 'VietmapTrackingSDK', '1.5.2'
   s.platform = :ios, '12.0'
   s.swift_version = '5.0'
 end

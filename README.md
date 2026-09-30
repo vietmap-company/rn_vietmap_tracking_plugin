@@ -105,6 +105,18 @@ await configure('YOUR_VIETMAP_API_KEY');
 await configureAlertAPI('YOUR_ALERT_API_URL', 'YOUR_ALERT_API_KEY');
 ```
 
+> **For production, prefer `initializeTracking`.** It checks the key against the
+> server before configuring and rejects with `INVALID_API_KEY` when the key or
+> host is wrong, where `configure` accepts whatever it is given and the mistake
+> only surfaces later, at upload time. It also takes `authMode` and
+> `autoUpload` — see [Auth mode](#auth-mode).
+>
+> ```typescript
+> await initializeTracking('YOUR_VIETMAP_API_KEY', 'https://live.fleetwork.vn/api/v1');
+> ```
+>
+> `configure` keeps working and needs no change if you already use it.
+
 ### Basic Location Tracking
 
 ```typescript
@@ -195,82 +207,320 @@ const disableSpeedAlerts = async () => {
   }
 };
 ```
-## 📚 Configuration Options
+## 📚 Configuration
 
-### LocationTrackingConfig Interface
+### Picking a tracking mode
+
+`intervalMs` and `distanceFilter` choose the SDK's trigger **between them**.
+Supply exactly one:
+
+| supplied | behaviour |
+|---|---|
+| `intervalMs` only | timer — a fix every N ms, moving or not |
+| `distanceFilter` only | displacement — a fix per N metres moved, none while stationary |
+| both | the SDK favours the timer and **ignores** the distance gate |
+| neither | the SDK's own defaults: a 10s timer with a 25m floor |
+
+Omit the one you do not want. Passing `0` is a value, not an absence, and the
+SDK clamps it up to its floor.
+
+**Floors, enforced natively and silently:** `intervalMs` is raised to 5000 and
+`distanceFilter` to 25. Intervals in the 5–10s band also have their uploads
+coalesced to a single 10s cadence to avoid server rate limiting; GPS sampling is
+unaffected.
+
+### LocationTrackingConfig
 
 ```typescript
 interface LocationTrackingConfig {
-  /** Interval between location updates in milliseconds */
-  intervalMs: number;
-  /** Minimum distance between location updates in meters */
-  distanceFilter: number;
-  /** Desired accuracy level */
-  accuracy: 'high' | 'medium' | 'low';
-  /** Whether to continue tracking in background */
-  backgroundMode: boolean;
-  /** Custom notification title for foreground service (Android) */
+  /** Milliseconds between updates. Omit for distance-driven or SDK-default tracking. */
+  intervalMs?: number;
+  /** Metres between updates. Omit for timer-driven or SDK-default tracking. */
+  distanceFilter?: number;
+  accuracy?: 'high' | 'medium' | 'low';
+  /** Defaults to true. Read once at start — stop and start again to change it. */
+  backgroundMode?: boolean;
+  /** Foreground service notification (Android only). */
   notificationTitle?: string;
-  /** Custom notification message for foreground service (Android) */
   notificationMessage?: string;
+  /** Required. Written into every upload as userId. */
+  userId?: string;
+  vehicleId?: string;
+  /** Defaults to true. See "Fake GPS" below before changing it. */
+  allowMockLocation?: boolean;
+  /** Derive speed when the OS reports 0 or -1. Defaults to true. */
+  enableSpeedFallback?: boolean;
+  /** Opt in to battery-aware cadence. Defaults to false. */
+  enableSmartBattery?: boolean;
+  smartBatteryPreset?: 'navigation' | 'general' | 'batterySaver';
 }
 ```
 
-### Tracking Presets (Utilities)
-
-Pre-configured tracking modes available as utilities:
+### Presets
 
 ```typescript
-import { TrackingPresets } from '@vietmap/rn_vietmap_tracking_plugin';
-
-// High accuracy for turn-by-turn navigation (1 second updates)
-TrackingPresets.NAVIGATION
-
-// Optimized for fitness and outdoor activities (5 second updates)
-TrackingPresets.FITNESS
-
-// Balanced accuracy and battery usage (30 second updates)
-TrackingPresets.GENERAL
-
-// Maximum battery conservation (5 minute updates)
-TrackingPresets.BATTERY_SAVER
+import { TRACKING_PRESETS, createSdkDefaultConfig } from '@vietmap/rn_vietmap_tracking_plugin';
 ```
 
-### Custom Configuration Examples
+| Preset | Trigger |
+|---|---|
+| `NAVIGATION` | 5s timer |
+| `FITNESS` | 10s timer |
+| `GENERAL` | 30s timer |
+| `BATTERY_SAVER` | 5min timer |
+| `NAVIGATION_DISTANCE` | 25m |
+| `FITNESS_DISTANCE` | 50m |
+| `GENERAL_DISTANCE` | 70m |
+| `BATTERY_SAVER_DISTANCE` | 120m |
+
+Every preset drives one trigger, never both. `createSdkDefaultConfig()` sets
+neither, leaving the cadence to the SDK.
+
+### Auth mode
 
 ```typescript
-// High precision navigation tracking
-const navigationConfig = {
-  intervalMs: 1000,              // Update every second
-  distanceFilter: 5,             // High precision - 5 meter filter
-  accuracy: 'high',              // GPS high accuracy
-  backgroundMode: true,          // Continue in background
-  notificationTitle: 'Navigation Active',
-  notificationMessage: 'Tracking your route'
-};
-
-// Battery optimized tracking
-const batteryConfig = {
-  intervalMs: 60000,             // Update every minute
-  distanceFilter: 100,           // 100 meter filter for battery savings
-  accuracy: 'medium',            // Balanced accuracy
-  backgroundMode: true,
-  notificationTitle: 'Background Tracking',
-  notificationMessage: 'Tracking with battery optimization'
-};
-
-// Fitness tracking
-const fitnessConfig = {
-  intervalMs: 5000,              // Update every 5 seconds
-  distanceFilter: 10,            // 10 meter precision
-  accuracy: 'high',              // High accuracy for sports
-  backgroundMode: true,
-  notificationTitle: 'Fitness Tracking',
-  notificationMessage: 'Recording your workout'
-};
+await initializeTracking(apiKey, baseURL, 'header', true);
 ```
+
+`authMode` decides whether the API key travels as the `X-API-Key` header
+(`'header'`, the default) or as `?apiKey=` (`'queryParam'`). The SDK reads it on
+**every upload path**, so a mismatch with your gateway turns every upload into a
+401 while tracking still looks perfectly healthy.
+
+`autoUpload` defaults to `true`. Set it `false` to hold locations in the cache
+and drive uploads yourself with `uploadCachedLocationsManually()`. It has no
+effect on Android, where uploads are always automatic.
+
+### Fake GPS
+
+`allowMockLocation` defaults to **`true`**, which differs from the SDK's own
+default of `false`. That is deliberate: the SDK drops every fix flagged as
+simulated before tracking sees it, and on a simulator or emulator *every* fix is
+simulated — so at `false` the demo silently uploads empty batches.
+
+**In production, set it to `false`** and choose what happens on a detection:
+
+```typescript
+await setFakeGPSPolicy('warn');   // 'skip' | 'warn' | 'stopTracking' | 'logToServer'
+await setFakeGpsNotificationConfig('Fake GPS detected', 'Location tracking paused.');
+
+const subscription = addFakeGPSDetectedListener((event) => {
+  console.log(event.lat, event.lng, event.reason); // reason is iOS-only
+});
+```
+
+The **event** fires under every policy. The **notification** only fires under
+`'warn'`. They are separate channels and are easy to conflate.
+
+### Notifications: what the SDK does, and what your app owes it
+
+**The native SDK posts the notification itself** — through
+`UNUserNotificationCenter` on iOS and its own high-importance channel on
+Android. It cannot, however, grant itself permission or decide how your app
+presents notifications. Two things are yours:
+
+**1. Permission.** Neither platform grants it implicitly, and **iOS never
+prompts when a notification is posted** — with authorization still
+`notDetermined` the post is dropped in silence. Ask in context, when the user
+turns on something that notifies:
+
+```typescript
+if (!(await hasNotificationPermission())) {
+  await requestNotificationPermission();
+}
+```
+
+On Android this requests `POST_NOTIFICATIONS`, which your app must also declare:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
+**2. Foreground presentation, iOS only.** A notification posted while your app
+is in the **foreground** is delivered and **not shown** unless you set a
+`UNUserNotificationCenterDelegate`. Without it the SDK's post succeeds and looks
+exactly like a failure — which is how most testing is done, with the app open.
+
+The plugin deliberately does not do this for you:
+`UNUserNotificationCenter.delegate` is a single app-wide slot, and a library
+claiming it would break any app that has its own delegate. Add it to your
+`AppDelegate`:
+
+```swift
+import UserNotifications
+
+class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+  func application(_ application: UIApplication,
+                   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+    UNUserNotificationCenter.current().delegate = self
+    // ...
+    return true
+  }
+
+  func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              willPresent notification: UNNotification,
+                              withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    completionHandler([.banner, .sound])
+  }
+}
+```
+
+**Debounce.** The SDK raises at most **one notification per 30 seconds**, so a
+continuous stream of mock fixes cannot flood the tray. One banner per 30s is
+working as intended.
+
+Both points apply equally to the tracking-interrupted notification below.
+
+### Tracking interruptions
+
+```typescript
+const subscription = addTrackingInterruptedListener((event) => {
+  console.log(event.reason, event.recovered, event.secondsSinceLastFix);
+});
+```
+
+**Do not stop and restart tracking in response.** The SDK raises these from GPS
+silence, so a restart only costs a fresh first fix and can loop. Disabling the
+notification does not silence the event — the callback channel fires either way.
+
+### Offline cache
+
+Locations are queued on device when the network is down and uploaded when it
+returns. A `0` in `configureCacheLimits` keeps the SDK's own value for that
+field, and those are **not identical across platforms**: `maxRecords` is 5000 on
+Android and 10000 on iOS, while `maxDbSizeBytes` (50MB) and `batchSize` (50)
+match.
+
+```typescript
+const pending = await getCachedLocationsCount();
+if (pending > 0 && (await isNetworkConnected())) {
+  await uploadCachedLocationsManually();
+}
+```
+
+`uploadCachedLocationsManually` reports the upload result on iOS. Android's SDK
+method returns nothing, so there it resolves `true` once the request has
+started — check `getCachedLocationsCount()` afterwards to see what drained.
+
+### App lifecycle
+
+The plugin observes app state **natively on both platforms** — `UIApplication`
+notifications on iOS, `LifecycleEventListener` on Android — and forwards it to
+the SDK. It also reads the current state at registration, so a module created
+while the app is already backgrounded does not leave the SDK believing
+otherwise.
+
+**Do not wire React Native's `AppState` to `onAppBackground`/`onAppForeground`.**
+`AppState` is itself a native observer of the same notifications that then
+crosses the bridge, so doing that delivers every transition twice — once
+natively and once three hops later. The two methods stay exported only for a
+host app that manages app state itself.
 
 ## 🛠️ API Reference
+
+Every method below exists on both platforms unless the notes say otherwise.
+
+### Configuration
+
+| Method | Notes |
+|---|---|
+| `initializeTracking(apiKey, baseURL?, authMode?, autoUpload?)` | Validates the key server-side first. **Prefer this.** Rejects `INVALID_API_KEY`. |
+| `configure(apiKey, baseURL?)` | Sets credentials without validating. Mistakes surface later, at upload time. |
+| `configureAlertAPI(apiKey, apiID)` | Alert engine credentials. |
+| `getPlatformVersion()` | `"iOS 18.0"` / `"Android 14"`. |
+
+### Identity
+
+| Method | Notes |
+|---|---|
+| `setDriverId(id)` / `getDriverId()` | Maps to the payload's `userId`. Also settable via the start config. |
+| `setVehicleId(id)` / `getVehicleId()` | Optional. |
+| `setMetadata(object)` | Arbitrary key-value data on every upload. |
+| `setPackages(string[])` | Rejects non-string entries rather than coercing them. |
+| `setAppSignature(string)` | |
+| `configureVehicle({vehicleId, vehicleType, seats, weight, maxProvision?})` | Used by the alert engine. |
+
+### Tracking
+
+| Method | Notes |
+|---|---|
+| `startTracking(config)` | Requires `config.userId`. Returns `false` for a duplicate or already-active start rather than throwing. |
+| `stopTracking()` | |
+| `updateTrackingConfig(config)` | Cadence only. `backgroundMode` is read at start and cannot change mid-session. |
+| `getCurrentLocation()` | |
+| `isTrackingActive()` | |
+| `getTrackingStatus()` | |
+| `getTrackingHealthStatus()` | Permissions, uptime, time since the last fix. Assembled in the module on Android, which has no SDK method for it. |
+| `getTrackingHistory({userId, fromTimestamp?, toTimestamp?, pageNumber?, pageSize?, sortBy?, sortDescending?})` | Timestamps are **milliseconds**; the Android SDK reads anything under 10 billion as seconds. |
+
+### Permissions
+
+| Method | Notes |
+|---|---|
+| `requestLocationPermissions()` | Returns a `PermissionResult`. |
+| `hasLocationPermissions()` | |
+| `requestAlwaysLocationPermissions()` | Required for background tracking. |
+
+### Offline cache
+
+| Method | Notes |
+|---|---|
+| `isNetworkConnected()` | The SDK's own view of the network. |
+| `getCachedLocationsCount()` | |
+| `uploadCachedLocationsManually()` | iOS reports the upload result; Android reports that it started. |
+| `clearCachedLocations()` | |
+| `configureCacheLimits({maxRecords?, maxDbSizeBytes?, batchSize?})` | A `0` or omitted field keeps the SDK's own value. |
+| `getDatabaseSizeBytes()` | |
+
+### Lifecycle
+
+| Method | Notes |
+|---|---|
+| `onAppBackground()` / `onAppForeground()` | Driven natively. Do not wire `AppState` to these. |
+| `setAutoUpload(enabled)` | iOS only; resolves `true` on Android, where uploads are always automatic. |
+
+### Fake GPS
+
+| Method | Notes |
+|---|---|
+| `setFakeGPSPolicy(policy)` | `'skip'` \| `'warn'` \| `'stopTracking'` \| `'logToServer'`. Only consulted while `allowMockLocation` is false. |
+| `setFakeGpsNotificationConfig(title, message)` | Used by the `'warn'` policy. |
+| `requestNotificationPermission()` | Required before any SDK notification can appear. iOS prompts once; Android requests `POST_NOTIFICATIONS` on API 33+ and resolves true below that. |
+| `hasNotificationPermission()` | Current authorization state. |
+
+### Tracking interrupted
+
+| Method | Notes |
+|---|---|
+| `setTrackingInterruptedNotificationEnabled(enabled)` | Does **not** silence the event. |
+| `setTrackingInterruptedNotificationConfig(title, message)` | |
+
+### Other
+
+| Method | Notes |
+|---|---|
+| `setSmartBatteryConfig(enabled, preset)` | Assembled in the plugin; neither SDK exposes it. |
+| `processExternalLocation({lat, lng, speed, heading})` | `speed` at or below 30 is read as m/s, above that as km/h. |
+| `turnOnAlert()` / `turnOffAlert()` | Alert engine. |
+
+### Events
+
+| Listener | Payload |
+|---|---|
+| `addLocationUpdateListener` | `LocationData` |
+| `addTrackingStatusListener` | `TrackingStatus` |
+| `addLocationErrorListener` | `{ message, timestamp }` |
+| `addFakeGPSDetectedListener` | `FakeGpsEvent` — `reason` is iOS-only |
+| `addTrackingInterruptedListener` | `TrackingInterruptedEvent` |
+
+### Native SDK versions
+
+| Platform | SDK |
+|---|---|
+| Android | `vietmap-tracking-sdk-android` 1.5.3 |
+| iOS | `VietmapTrackingSDK` 1.5.2 |
+
+### Detailed examples
 
 ### Core Configuration Methods
 
@@ -636,6 +886,23 @@ npm install react react-native @babel/runtime
   npx react-native start --reset-cache
   ```
 - Ensure you're using Node.js >= 16 and npm >= 7
+
+## 🗂 Maintainer notes
+
+`docs/` holds the working record behind this plugin — not user documentation,
+but the reasoning that explains why parts of the code look the way they do.
+
+| File | What it covers |
+|---|---|
+| [`docs/UPGRADE_PLAN.md`](docs/UPGRADE_PLAN.md) | 14 findings from the 0.1.4 → 0.2.0 work, each with the symptom that led to it |
+| [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The 12-step plan, including what is still unverified |
+| [`docs/FAKE_GPS_NOTIFICATION_PLAN.md`](docs/FAKE_GPS_NOTIFICATION_PLAN.md) | Who owns notification permission and presentation — the SDK posts, your app authorises |
+| [`docs/TIMESTAMP_FIX_PLAN.md`](docs/TIMESTAMP_FIX_PLAN.md) | The millisecond convention and the object-shape audit |
+
+Worth reading before "correcting" something that looks odd: several of those
+oddities are deliberate, and the reason is written down there.
+
+Releasing a new version: [`RELEASING.md`](RELEASING.md).
 
 ## 📄 License
 

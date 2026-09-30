@@ -1,5 +1,5 @@
 import type { LocationTrackingConfig } from './types';
-import { LIMITS, LOCATION_ACCURACY } from './constants';
+import { LIMITS, LOCATION_ACCURACY, SDK_FLOORS } from './constants';
 
 /**
  * Validation result interface
@@ -19,36 +19,65 @@ export function validateLocationConfig(config: LocationTrackingConfig): Validati
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // Validate interval
-  if (!config.intervalMs || typeof config.intervalMs !== 'number') {
-    errors.push('intervalMs must be a number');
-  } else if (config.intervalMs < LIMITS.MIN_INTERVAL_MS) {
-    errors.push(`intervalMs must be at least ${LIMITS.MIN_INTERVAL_MS}ms`);
-  } else if (config.intervalMs > LIMITS.MAX_INTERVAL_MS) {
-    errors.push(`intervalMs must be at most ${LIMITS.MAX_INTERVAL_MS}ms`);
-  } else if (config.intervalMs < 5000) {
-    warnings.push('Very frequent updates may impact battery life');
+  // Trigger values. Both are optional now: absent means "let the SDK decide",
+  // which is a valid config, not a missing field. Only a value that is present
+  // and wrong is an error.
+  if (config.intervalMs != null) {
+    if (typeof config.intervalMs !== 'number' || Number.isNaN(config.intervalMs)) {
+      errors.push('intervalMs must be a number when provided');
+    } else if (config.intervalMs > LIMITS.MAX_INTERVAL_MS) {
+      errors.push(`intervalMs must be at most ${LIMITS.MAX_INTERVAL_MS}ms`);
+    } else if (config.intervalMs < SDK_FLOORS.MIN_INTERVAL_MS) {
+      // Not an error: the SDK accepts it and silently raises it. Saying so is
+      // more useful than rejecting a config that will in fact run.
+      warnings.push(
+        `intervalMs ${config.intervalMs} is below the SDK floor and will be raised to ${SDK_FLOORS.MIN_INTERVAL_MS}ms`
+      );
+    }
   }
 
-  // Validate distance filter
-  if (typeof config.distanceFilter !== 'number') {
-    errors.push('distanceFilter must be a number');
-  } else if (config.distanceFilter < LIMITS.MIN_DISTANCE_FILTER) {
-    errors.push(`distanceFilter must be at least ${LIMITS.MIN_DISTANCE_FILTER}m`);
-  } else if (config.distanceFilter > LIMITS.MAX_DISTANCE_FILTER) {
-    errors.push(`distanceFilter must be at most ${LIMITS.MAX_DISTANCE_FILTER}m`);
+  if (config.distanceFilter != null) {
+    if (
+      typeof config.distanceFilter !== 'number' ||
+      Number.isNaN(config.distanceFilter)
+    ) {
+      errors.push('distanceFilter must be a number when provided');
+    } else if (config.distanceFilter > LIMITS.MAX_DISTANCE_FILTER) {
+      errors.push(`distanceFilter must be at most ${LIMITS.MAX_DISTANCE_FILTER}m`);
+    } else if (config.distanceFilter < SDK_FLOORS.MIN_DISTANCE_FILTER_M) {
+      warnings.push(
+        `distanceFilter ${config.distanceFilter} is below the SDK floor and will be raised to ${SDK_FLOORS.MIN_DISTANCE_FILTER_M}m`
+      );
+    }
   }
 
-  // Validate accuracy
-  if (!config.accuracy || typeof config.accuracy !== 'string') {
-    errors.push('accuracy must be a string');
-  } else if (!Object.values(LOCATION_ACCURACY).includes(config.accuracy as any)) {
-    errors.push(`accuracy must be one of: ${Object.values(LOCATION_ACCURACY).join(', ')}`);
+  // Supplying both is legal but rarely intended: the SDK gives the timer
+  // priority and ignores the distance gate, so a distance filter set alongside
+  // an interval does nothing.
+  if (config.intervalMs != null && config.distanceFilter != null) {
+    warnings.push(
+      'intervalMs and distanceFilter are both set; the SDK will use the timer and ignore distanceFilter'
+    );
   }
 
-  // Validate background mode
-  if (typeof config.backgroundMode !== 'boolean') {
-    errors.push('backgroundMode must be a boolean');
+  // Validate accuracy (optional)
+  if (config.accuracy != null) {
+    if (typeof config.accuracy !== 'string') {
+      errors.push('accuracy must be a string when provided');
+    } else if (!Object.values(LOCATION_ACCURACY).includes(config.accuracy as any)) {
+      errors.push(`accuracy must be one of: ${Object.values(LOCATION_ACCURACY).join(', ')}`);
+    }
+  }
+
+  // Validate background mode (optional, defaults to true)
+  if (config.backgroundMode != null && typeof config.backgroundMode !== 'boolean') {
+    errors.push('backgroundMode must be a boolean when provided');
+  }
+
+  // userId is required by the SDK, but only at start time. A config object on
+  // its own may legitimately not carry it yet, so this is a warning.
+  if (config.userId != null && config.userId.trim() === '') {
+    warnings.push('userId is blank; the SDK will refuse to start tracking');
   }
 
   // Validate notification strings (optional)
@@ -61,11 +90,11 @@ export function validateLocationConfig(config: LocationTrackingConfig): Validati
   }
 
   // Additional warnings
-  if (config.backgroundMode && config.intervalMs < 10000) {
+  if (config.backgroundMode !== false && (config.intervalMs ?? 0) > 0 && config.intervalMs! < 10000) {
     warnings.push('Background tracking with frequent updates may be limited by the OS');
   }
 
-  if (config.accuracy === 'low' && config.distanceFilter < 50) {
+  if (config.accuracy === 'low' && (config.distanceFilter ?? Infinity) < 50) {
     warnings.push('Low accuracy with small distance filter may result in inaccurate filtering');
   }
 

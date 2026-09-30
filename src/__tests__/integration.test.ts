@@ -20,17 +20,48 @@ describe('GPS Tracking Package Tests', () => {
       expect(result.errors).toHaveLength(0);
     });
 
-    test('should reject invalid interval', () => {
+    test('warns rather than rejects below the SDK floor', () => {
+      // An interval under the floor is not invalid: the SDK accepts it and
+      // silently raises it to 5000. Rejecting would refuse a config that does
+      // in fact run, so this is a warning and the message says what will
+      // actually take effect.
       const config = {
-        intervalMs: 500, // Too low
-        distanceFilter: 10,
+        intervalMs: 500,
         accuracy: 'high' as const,
         backgroundMode: true
       };
 
       const result = validateLocationConfig(config);
+      expect(result.isValid).toBe(true);
+      expect(result.warnings.some((w) => w.includes('below the SDK floor'))).toBe(true);
+    });
+
+    test('rejects an interval above the maximum', () => {
+      const result = validateLocationConfig({
+        intervalMs: 999_999_999,
+        accuracy: 'high' as const,
+        backgroundMode: true
+      });
       expect(result.isValid).toBe(false);
-      expect(result.errors).toContain('intervalMs must be at least 1000ms');
+      expect(result.errors.some((e) => e.includes('at most'))).toBe(true);
+    });
+
+    test('warns when both triggers are set, since the SDK ignores one', () => {
+      const result = validateLocationConfig({
+        intervalMs: 5000,
+        distanceFilter: 25,
+        accuracy: 'high' as const,
+        backgroundMode: true
+      });
+      expect(result.isValid).toBe(true);
+      expect(result.warnings.some((w) => w.includes('ignore distanceFilter'))).toBe(true);
+    });
+
+    test('accepts a config with neither trigger', () => {
+      // Valid, and the way to ask for the SDK's own cadence.
+      const result = validateLocationConfig({ accuracy: 'high' as const, backgroundMode: true });
+      expect(result.isValid).toBe(true);
+      expect(result.errors).toHaveLength(0);
     });
 
     test('should reject invalid accuracy', () => {
@@ -58,8 +89,10 @@ describe('GPS Tracking Package Tests', () => {
       };
 
       const normalized = normalizeLocationConfig(config);
-      expect(normalized.intervalMs).toBe(1000); // Min value
-      expect(normalized.distanceFilter).toBe(0); // Min value
+      // Clamped to the floors the SDK actually enforces, not to the lower
+      // numbers this file used to assert - those were never reachable.
+      expect(normalized.intervalMs).toBe(5000);
+      expect(normalized.distanceFilter).toBe(25);
       expect(normalized.accuracy).toBe('high'); // Default
       expect(normalized.backgroundMode).toBe(false); // Boolean conversion
     });

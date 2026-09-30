@@ -1,11 +1,14 @@
 {
   "extends": "@react-native/typescript-config/tsconfig.json",
   "compilerOptions": {
-    "jsx": "react",
+    "jsx": "react-jsx",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "strict": true,
-    "types": ["react-native", "jest"]
+    "types": ["react-native", "jest"],
+    "paths": {
+      "@vietmap/rn_vietmap_tracking_plugin": ["../src/index"]
+    }
   },
   "include": [
     "src/**/*",

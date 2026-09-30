@@ -4,59 +4,16 @@ import type { LocationTrackingConfig } from './types';
 /**
  * Predefined tracking configurations for common use cases
  */
-export const TrackingPresets = {
-  /**
-   * High precision tracking for navigation apps
-   * Updates every 1 second with high accuracy
-   */
-  NAVIGATION: {
-    intervalMs: 1000,
-    distanceFilter: 5,
-    accuracy: 'high' as const,
-    backgroundMode: true,
-    notificationTitle: 'Navigation Active',
-    notificationMessage: 'Tracking your route'
-  },
-
-  /**
-   * Fitness tracking configuration
-   * Updates every 5 seconds with high accuracy
-   */
-  FITNESS: {
-    intervalMs: 5000,
-    distanceFilter: 10,
-    accuracy: 'high' as const,
-    backgroundMode: true,
-    notificationTitle: 'Fitness Tracking',
-    notificationMessage: 'Recording your workout'
-  },
-
-  /**
-   * General location tracking
-   * Updates every 30 seconds with medium accuracy
-   */
-  GENERAL: {
-    intervalMs: 30000,
-    distanceFilter: 50,
-    accuracy: 'medium' as const,
-    backgroundMode: true,
-    notificationTitle: 'Location Tracking',
-    notificationMessage: 'Tracking your location'
-  },
-
-  /**
-   * Battery optimized tracking
-   * Updates every 5 minutes with low accuracy
-   */
-  BATTERY_SAVER: {
-    intervalMs: 300000, // 5 minutes
-    distanceFilter: 100,
-    accuracy: 'low' as const,
-    backgroundMode: true,
-    notificationTitle: 'Background Tracking',
-    notificationMessage: 'Tracking with battery optimization'
-  }
-};
+/**
+ * Tracking presets.
+ *
+ * Re-exported from constants.ts rather than defined here. This file used to
+ * carry a second copy with its own values, which had already drifted below the
+ * SDK's floors (1000ms / 5m for NAVIGATION, against floors of 5000ms / 25m) and
+ * set both trigger values at once, making every distance preset behave as a
+ * timer. One definition, in constants.ts.
+ */
+export { TRACKING_PRESETS as TrackingPresets } from './constants';
 
 /**
  * Utility functions for location tracking
@@ -180,8 +137,8 @@ export class LocationUtils {
       }
     } else if (Platform.OS === 'android') {
       // Android specific optimizations
-      if (config.intervalMs < 5000) {
-        // Android battery optimization - removed warning
+      if ((config.intervalMs ?? 0) > 0 && config.intervalMs! < 5000) {
+        // Below the SDK floor; it is raised natively to 5000.
       }
     }
 

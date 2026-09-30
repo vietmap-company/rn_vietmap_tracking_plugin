@@ -5,9 +5,9 @@ PODS:
   - FBLazyVector (0.79.6)
   - fmt (11.0.2)
   - glog (0.3.5)
-  - hermes-engine (0.79.5):
-    - hermes-engine/Pre-built (= 0.79.5)
-  - hermes-engine/Pre-built (0.79.5)
+  - hermes-engine (0.79.6):
+    - hermes-engine/Pre-built (= 0.79.6)
+  - hermes-engine/Pre-built (0.79.6)
   - RCT-Folly (2024.11.18.00):
     - boost
     - DoubleConversion
@@ -1654,11 +1654,13 @@ PODS:
     - React-logger (= 0.79.6)
     - React-perflogger (= 0.79.6)
     - React-utils (= 0.79.6)
-  - rn_vietmap_tracking_plugin (0.1.2):
+  - rn_vietmap_tracking_plugin (0.1.4):
     - React-Core
-    - VietmapTrackingSDK (= 1.1.6)
+    - VietmapTrackingSDK (= 1.5.2)
+  - RNCAsyncStorage (2.2.0):
+    - React-Core
   - SocketRocket (0.7.1)
-  - VietmapTrackingSDK (1.1.6)
+  - VietmapTrackingSDK (1.5.2)
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -1734,12 +1736,13 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - rn_vietmap_tracking_plugin (from `../..`)
+  - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
+  - VietmapTrackingSDK (from `https://cdn.cocoapods.org/Specs/2/d/2/VietmapTrackingSDK/1.5.2/VietmapTrackingSDK.podspec.json`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
   trunk:
     - SocketRocket
-    - VietmapTrackingSDK
 
 EXTERNAL SOURCES:
   boost:
@@ -1883,6 +1886,10 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   rn_vietmap_tracking_plugin:
     :path: "../.."
+  RNCAsyncStorage:
+    :path: "../node_modules/@react-native-async-storage/async-storage"
+  VietmapTrackingSDK:
+    :podspec: https://cdn.cocoapods.org/Specs/2/d/2/VietmapTrackingSDK/1.5.2/VietmapTrackingSDK.podspec.json
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -1893,7 +1900,7 @@ SPEC CHECKSUMS:
   FBLazyVector: 07309209b7b914451b8f822544a18e2a0a85afff
   fmt: a40bb5bd0294ea969aaaba240a927bd33d878cdd
   glog: 5683914934d5b6e4240e497e0f4a3b42d1854183
-  hermes-engine: f03b0e06d3882d71e67e45b073bb827da1a21aae
+  hermes-engine: 44bb6fe76a6eb400d3a992e2d0b21946ae999fa9
   RCT-Folly: e78785aa9ba2ed998ea4151e314036f6c49e6d82
   RCTDeprecation: 9bc64754b40b86fa5e32f293ab3ea8eea2248339
   RCTRequired: ee36c1ce9a5e65a3f629c13f38a85308eb8eebda
@@ -1956,11 +1963,12 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: ae0be24eb18014a031b4b220cb3973d07c3cbaf8
   ReactCodegen: 06cf663b23a161f42a2e14087269753f422885c0
   ReactCommon: 44c86ec3ace664c0f33b7a2ac89aced8304ef25e
-  rn_vietmap_tracking_plugin: 9007900744b8c1d57999338d6d07a10f009ac30b
+  rn_vietmap_tracking_plugin: 11528fbed434c7d027f05a1b2058d3b51bec8201
+  RNCAsyncStorage: b44e8a4e798c3e1f56bffccd0f591f674fb9198f
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  VietmapTrackingSDK: a47ee86703a3a2cea313de0cb4186ba7c37ecfbe
+  VietmapTrackingSDK: 2c0cc63827150af0bb24951666dc0b6e36d75f24
   Yoga: dc7c21200195acacb62fa920c588e7c2106de45e
 
-PODFILE CHECKSUM: 3061c7fee4334ac2a30ed8a0620fe46a2b91e37d
+PODFILE CHECKSUM: c2e7914597b987de0788889ad1208f821c050f42
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.15.2
