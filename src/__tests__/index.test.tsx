@@ -96,6 +96,28 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+/**
+ * Silence an expected console call for the length of one test.
+ *
+ * Three tests below drive the code down its error paths on purpose, and the
+ * warning each one prints is the proof the guard fired. Jest still collects
+ * them into a `● Console` block that reads like failure next to a passing
+ * suite — noise that looks like breakage teaches people to skim past output,
+ * which is how a real error eventually slips through.
+ *
+ * Returns the spy, so a test can also assert *that* the warning happened
+ * rather than only that it was quiet.
+ */
+function expectConsole(method: 'warn' | 'error') {
+  return jest.spyOn(console, method).mockImplementation(() => {});
+}
+
+afterEach(() => {
+  // Restores the spies above, so a failing assertion cannot leave console
+  // muted for the rest of the run.
+  jest.restoreAllMocks();
+});
+
 describe('configuration', () => {
   test('initializeTracking passes authMode and autoUpload, defaulting to the SDK values', async () => {
     await plugin.initializeTracking('key-1234567890', 'https://example.test/api/v1');
@@ -139,11 +161,13 @@ describe('startTracking guards', () => {
 
   test('checks isTrackingActive before requesting permissions', async () => {
     await configured();
+    const warn = expectConsole('warn');
     mockNative.isTrackingActive.mockResolvedValueOnce(true);
 
     const started = await plugin.startLocationTracking(VALID_CONFIG);
 
     expect(started).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('already active'));
     // The point of the ordering: a redundant start must not raise a permission
     // dialog at someone who is already being tracked.
     expect(mockNative.hasLocationPermissions).not.toHaveBeenCalled();
@@ -152,6 +176,7 @@ describe('startTracking guards', () => {
 
   test('a second concurrent start is a no-op rather than a race', async () => {
     await configured();
+    const warn = expectConsole('warn');
     let release: (value: boolean) => void = () => {};
     mockNative.startTracking.mockReturnValueOnce(
       new Promise<boolean>((resolve) => {
@@ -163,6 +188,7 @@ describe('startTracking guards', () => {
     const second = await plugin.startLocationTracking(VALID_CONFIG);
 
     expect(second).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('already running'));
     release(true);
     expect(await first).toBe(true);
     expect(mockNative.startTracking).toHaveBeenCalledTimes(1);
@@ -279,8 +305,16 @@ describe('history parsing', () => {
 
   test('malformed JSON yields an empty list rather than throwing', async () => {
     await configured();
+    const error = expectConsole('error');
     mockNative.getTrackingHistory.mockResolvedValueOnce('not json');
+
     expect(await plugin.getTrackingHistory({ userId: 'u' })).toEqual([]);
+    // The log is part of the contract: swallowing bad JSON without a trace
+    // would make a broken server response indistinguishable from an empty day.
+    expect(error).toHaveBeenCalledWith(
+      'Failed to parse tracking history:',
+      expect.any(SyntaxError)
+    );
   });
 });
 

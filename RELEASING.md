@@ -170,11 +170,19 @@ cd example/ios && bundle exec pod install && cd ../..
 npm run release
 ```
 
+> **Tag phải là `0.2.0`, không phải `v0.2.0`.** Podspec khai
+> `:tag => "#{s.version}"`, nên CocoaPods đi tìm đúng chuỗi version, không có
+> tiền tố. Các bản trước đều tag như vậy: `0.1.2`, `0.1.3`, `0.1.4`.
+>
+> Cấu hình `release-it` từng để `v${version}` và chưa ai dùng tới — đã sửa ở
+> 0.2.0. Nếu sau này đổi sang có tiền tố thì phải đổi cả podspec, nếu không
+> CocoaPods sẽ không tải được source.
+
 `npm run release` chạy `release-it --only-version`, và nó sẽ:
 
 1. Hỏi xác nhận version
 2. Tạo commit `chore: release ${version}`
-3. Tạo tag `v${version}`
+3. Tạo tag `${version}` — không tiền tố, khớp podspec
 4. Publish lên npm
 5. Tạo GitHub release
 
@@ -195,7 +203,8 @@ Rồi commit tay. Dùng khi muốn tách bước bump khỏi bước publish.
       Trường `files` trong `package.json` quyết định cái gì vào gói —
       `src`, `lib`, `android`, `ios`, `cpp`, `*.podspec`,
       `react-native.config.js`. Tài liệu và example **không** vào gói.
-- [ ] CocoaPods lấy version từ git tag, nên tag phải được push
+- [ ] CocoaPods lấy version từ git tag, nên tag phải được push, và tên tag
+      phải khớp `s.version` trong podspec — `0.2.0`, không phải `v0.2.0`
 - [ ] Cài thử vào một app sạch bằng version vừa publish
 
 ## Những chỗ hay sai
