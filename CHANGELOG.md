@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [0.2.0] - 2026-09-30
 
 Parity with `vietmap_flutter_tracking_plugin`: 23 new methods, two new events,
@@ -193,8 +195,6 @@ a reworked config layer and a rebuilt example app.
 | React Native | 0.79.6 (minimum supported: see `docs/UPGRADE_PLAN.md`) |
 | Android SDK | `vietmap-tracking-sdk-android` 1.5.3 |
 | iOS SDK | `VietmapTrackingSDK` 1.5.2 |
-
-## [Unreleased]
 
 ## [0.1.4] - 2025-09-19
 

@@ -135,12 +135,14 @@ Muốn tự làm từng bước:
 
 ```bash
 git add package.json && git commit -m "chore: release 0.2.0"
-git tag v0.2.0
+git tag 0.2.0          # khong tien to "v" - podspec tim dung chuoi version
 git push origin main --tags
 npm publish
 ```
 
-CocoaPods lấy version từ git tag, nên **tag phải được push**.
+CocoaPods lấy version từ git tag, nên **tag phải được push** — và tên tag phải
+khớp `s.version` trong podspec, tức `0.2.0` chứ không phải `v0.2.0`. Các bản
+trước đều tag không tiền tố.
 
 ---
 
