@@ -19,6 +19,23 @@ end
 target 'RnVietmapTrackingPluginExample' do
   config = use_native_modules!
 
+  # VietmapTrackingSDK arrives transitively from rn_vietmap_tracking_plugin.podspec
+  # (s.dependency 'VietmapTrackingSDK', '1.5.2'). Declaring it here with an explicit
+  # podspec URL fetches that single file instead of going through the trunk version
+  # index, which is what `pod install --repo-update` walks - and that bulk parallel
+  # fetch is what fails with "Error in the HTTP2 framing layer", leaving empty version
+  # directories behind in ~/.cocoapods/repos/trunk.
+  #
+  # Mirrors vietmap_flutter_tracking_plugin/example/ios/Podfile. Keep the version here
+  # in sync with the s.dependency in ../../rn_vietmap_tracking_plugin.podspec.
+  pod 'VietmapTrackingSDK',
+      :podspec => 'https://cdn.cocoapods.org/Specs/2/d/2/VietmapTrackingSDK/1.5.2/VietmapTrackingSDK.podspec.json'
+
+  # Local build - swap to this (and to a version-less s.dependency in the plugin
+  # podspec) to consume the VietmapTrackingSDK.xcframework built in place by
+  # `bash build_xcframework.sh` in map-sdk-tracking/ios.
+  # pod 'VietmapTrackingSDK', :path => '../../../map-sdk-tracking/ios'
+
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.
@@ -33,5 +50,45 @@ target 'RnVietmapTrackingPluginExample' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # ---------------------------------------------------------------------
+    # WORKAROUND: fmt 11.0.2 does not build under Apple clang 21 (Xcode 26).
+    #
+    # fmt/base.h only blacklists Apple clang < 14 before turning consteval on,
+    # so clang 21 takes the `defined(__cpp_consteval)` branch and enables it.
+    # The FMT_STRING(...) calls inside format-inl.h then fail with
+    # "call to consteval function ... is not a constant expression"
+    # (format-inl.h lines 59, 60, 1387, 1391, 1394).
+    #
+    # -DFMT_USE_CONSTEVAL=0 does NOT help on 11.0.2: that version has no
+    # `#ifdef FMT_USE_CONSTEVAL` guard at the top of the block, so its own
+    # #define always wins. fmt 12.1.0 added that guard - React Native only
+    # ships fmt 12 from 0.83 onwards, and this example is on 0.79.
+    #
+    # So patch the guard in place instead: make the Apple-clang branch
+    # unconditional, which is the same code path old Apple clang already took.
+    # The only thing lost is compile-time format-string checking inside fmt.
+    #
+    # Remove this block once React Native is upgraded to 0.83+.
+    # ---------------------------------------------------------------------
+    fmt_base_h = File.join(installer.sandbox.root, 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base_h)
+      src = File.read(fmt_base_h)
+      needle = '#elif defined(__apple_build_version__) && __apple_build_version__ < 14000029L'
+      patched = '#elif defined(__apple_build_version__) // patched: consteval is also broken in Apple clang 21'
+      if src.include?(needle)
+        # CocoaPods checks out pod sources read-only (0444), so restore the
+        # mode after writing rather than leaving the file writable.
+        mode = File.stat(fmt_base_h).mode & 0o7777
+        File.chmod(0o644, fmt_base_h)
+        File.write(fmt_base_h, src.sub(needle, patched))
+        File.chmod(mode, fmt_base_h)
+        Pod::UI.puts '[fmt] Disabled consteval for Apple clang (Xcode 26 workaround)'.yellow
+      elsif src.include?(patched)
+        Pod::UI.puts '[fmt] consteval workaround already applied'.yellow
+      else
+        Pod::UI.warn '[fmt] consteval guard not found - fmt may have been upgraded; re-check this workaround'
+      end
+    end
   end
 end

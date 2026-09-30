@@ -10,9 +10,11 @@
     "build:ios": "react-native build-ios --mode Debug"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.1.2",
     "@vietmap/rn_vietmap_tracking_plugin": "*",
     "react": "19.0.0",
-    "react-native": "^0.79.5"
+    "react-native": "0.79.6",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
